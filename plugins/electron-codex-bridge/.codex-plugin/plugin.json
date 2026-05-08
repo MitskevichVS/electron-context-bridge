@@ -1,0 +1,39 @@
+{
+  "name": "electron-codex-bridge",
+  "version": "0.1.0",
+  "description": "Connect Codex to an Electron app through a local MCP bridge, Electron main-process HTTP bridge, and Chrome DevTools Protocol.",
+  "author": {
+    "name": "MitskevichVS",
+    "email": "developer@example.com",
+    "url": "https://github.com/MitskevichVS"
+  },
+  "homepage": "https://github.com/MitskevichVS/electron-context-bridge",
+  "repository": "https://github.com/MitskevichVS/electron-context-bridge.git",
+  "license": "MIT",
+  "keywords": [
+    "electron",
+    "mcp",
+    "debugging",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Electron Codex Bridge",
+    "shortDescription": "Inspect and drive local Electron apps from Codex.",
+    "longDescription": "Adds MCP tools for Chrome DevTools Protocol targets and a local Electron main-process bridge so Codex can inspect windows, invoke explicit app handlers, evaluate renderer state in development, and capture BrowserWindow screenshots.",
+    "developerName": "MitskevichVS",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "List Electron windows and CDP targets.",
+      "Capture the focused Electron BrowserWindow.",
+      "Invoke my Electron bridge health check."
+    ],
+    "brandColor": "#2F6FED"
+  }
+}

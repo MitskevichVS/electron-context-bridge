@@ -1,0 +1,20 @@
+{
+  "name": "electron-context-bridge",
+  "interface": {
+    "displayName": "Electron Context Bridge"
+  },
+  "plugins": [
+    {
+      "name": "electron-codex-bridge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/electron-codex-bridge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

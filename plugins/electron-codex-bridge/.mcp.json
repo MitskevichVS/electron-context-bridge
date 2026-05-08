@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "electron-codex-bridge": {
+      "command": "node",
+      "args": [
+        "./scripts/electron-codex-bridge.mjs"
+      ],
+      "env": {
+        "CODEX_ELECTRON_CDP_URL": "http://127.0.0.1:9223",
+        "CODEX_ELECTRON_BRIDGE_URL": "http://127.0.0.1:17345"
+      }
+    }
+  }
+}
