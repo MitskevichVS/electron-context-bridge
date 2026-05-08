@@ -13,6 +13,52 @@ const BRIDGE_TOKEN = process.env.CODEX_ELECTRON_BRIDGE_TOKEN || "";
 
 const tools = [
   {
+    name: "electron_orchestrator_inspect",
+    description: "Run the standard Electron inspection flow in one tool call: bridge health, windows, CDP version, CDP targets, renderer probe, and optional screenshot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cdpUrl: {
+          type: "string",
+          description: "CDP base URL. Defaults to CODEX_ELECTRON_CDP_URL or http://127.0.0.1:9223."
+        },
+        bridgeUrl: {
+          type: "string",
+          description: "Bridge base URL. Defaults to CODEX_ELECTRON_BRIDGE_URL or http://127.0.0.1:17345."
+        },
+        targetId: {
+          type: "string",
+          description: "Renderer target id from electron_cdp_list_targets."
+        },
+        urlIncludes: {
+          type: "string",
+          description: "Choose the first target whose URL or title includes this text."
+        },
+        includeRendererProbe: {
+          type: "boolean",
+          default: true,
+          description: "Evaluate a small read-only renderer probe for title, URL, readyState, viewport, and active element."
+        },
+        includeScreenshot: {
+          type: "boolean",
+          default: true,
+          description: "Capture a screenshot from the selected renderer target."
+        },
+        screenshotFormat: {
+          type: "string",
+          enum: ["png", "jpeg"],
+          default: "png"
+        },
+        screenshotQuality: {
+          type: "number",
+          minimum: 0,
+          maximum: 100,
+          description: "JPEG quality only."
+        }
+      }
+    }
+  },
+  {
     name: "electron_cdp_get_version",
     description: "Read Chrome DevTools Protocol version metadata from the Electron debugging port.",
     inputSchema: {
@@ -537,6 +583,150 @@ function summarizeTarget(target) {
   };
 }
 
+async function orchestratorInspect(args) {
+  const report = {
+    generatedAt: new Date().toISOString(),
+    cdp: {
+      url: baseUrl(args.cdpUrl, DEFAULT_CDP_URL)
+    },
+    bridge: {
+      url: baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL)
+    },
+    notes: []
+  };
+  const content = [];
+
+  const bridgeHealth = await attempt(() =>
+    bridgeRequest({ ...args, path: "/health", method: "GET" })
+  );
+  report.bridge.health = unwrapAttempt(bridgeHealth, (value) => value.body);
+
+  const bridgeWindows = await attempt(() =>
+    bridgeRequest({ ...args, path: "/windows", method: "GET" })
+  );
+  report.bridge.windows = unwrapAttempt(bridgeWindows, (value) => value.body);
+
+  const cdpVersion = await attempt(() => getCdpVersion(args));
+  report.cdp.version = unwrapAttempt(cdpVersion);
+
+  const cdpTargets = await attempt(() => listCdpTargets(args));
+  report.cdp.targets = unwrapAttempt(cdpTargets, (value) => value.map(summarizeTarget));
+
+  const selectedTarget = await attempt(() => selectTarget(args));
+  report.cdp.selectedTarget = unwrapAttempt(selectedTarget, summarizeTarget);
+
+  if (!cdpTargets.ok) {
+    report.notes.push("CDP is not reachable. Confirm the Electron app started with remote-debugging-port=9223.");
+  }
+
+  if (!bridgeHealth.ok) {
+    report.notes.push("The main-process bridge is not reachable. Confirm ENABLE_CODEX_BRIDGE=1 and startCodexBridge() are active.");
+  }
+
+  if (args.includeRendererProbe !== false) {
+    const rendererProbe = await attempt(() =>
+      cdpEvaluate({
+        ...args,
+        expression: rendererProbeExpression(),
+        awaitPromise: true,
+        returnByValue: true
+      })
+    );
+    report.cdp.rendererProbe = unwrapAttempt(rendererProbe, unwrapRuntimeEvaluation);
+  }
+
+  if (args.includeScreenshot !== false) {
+    const screenshot = await attempt(() =>
+      cdpScreenshot({
+        ...args,
+        format: args.screenshotFormat || "png",
+        quality: args.screenshotQuality
+      })
+    );
+
+    report.cdp.screenshot = unwrapAttempt(screenshot, (value) => ({
+      target: value.target,
+      mimeType: value.mimeType,
+      includedAsImage: true
+    }));
+
+    if (screenshot.ok) {
+      content.push({
+        type: "image",
+        data: screenshot.value.data,
+        mimeType: screenshot.value.mimeType
+      });
+    }
+  }
+
+  content.unshift({
+    type: "text",
+    text: JSON.stringify(report, null, 2)
+  });
+
+  return { content };
+}
+
+async function attempt(fn) {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+function unwrapAttempt(attemptResult, mapValue = (value) => value) {
+  if (attemptResult.ok) {
+    return {
+      ok: true,
+      value: mapValue(attemptResult.value)
+    };
+  }
+
+  return {
+    ok: false,
+    error: attemptResult.error
+  };
+}
+
+function unwrapRuntimeEvaluation(value) {
+  const runtimeResult = value.result?.result;
+  const exceptionDetails = value.result?.exceptionDetails;
+  return {
+    target: value.target,
+    value: runtimeResult?.value ?? runtimeResult,
+    exceptionDetails
+  };
+}
+
+function rendererProbeExpression() {
+  return `(() => ({
+    title: document.title,
+    href: location.href,
+    readyState: document.readyState,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio
+    },
+    activeElement: document.activeElement
+      ? {
+          tagName: document.activeElement.tagName,
+          id: document.activeElement.id || "",
+          className: String(document.activeElement.className || ""),
+          name: document.activeElement.getAttribute("name") || "",
+          type: document.activeElement.getAttribute("type") || "",
+          role: document.activeElement.getAttribute("role") || "",
+          ariaLabel: document.activeElement.getAttribute("aria-label") || ""
+        }
+      : null
+  }))()`;
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function bridgeRequest(args) {
   const bridgeUrl = baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL);
   const rawPath = args.path || "/";
@@ -555,6 +745,8 @@ async function bridgeRequest(args) {
 
 async function callTool(name, args) {
   switch (name) {
+    case "electron_orchestrator_inspect":
+      return orchestratorInspect(args);
     case "electron_cdp_get_version":
       return textResult(await getCdpVersion(args));
     case "electron_cdp_list_targets":

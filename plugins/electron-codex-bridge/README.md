@@ -10,6 +10,7 @@ It contributes:
 
 ## MCP Tools
 
+- `electron_orchestrator_inspect`
 - `electron_cdp_get_version`
 - `electron_cdp_list_targets`
 - `electron_cdp_evaluate`
@@ -20,6 +21,8 @@ It contributes:
 - `electron_bridge_list_windows`
 - `electron_bridge_invoke`
 - `electron_bridge_request`
+
+Start with `electron_orchestrator_inspect`. It runs the common inspection flow in one call: bridge health, window list, CDP version, CDP targets, renderer probe, and optional screenshot.
 
 ## Electron Setup
 

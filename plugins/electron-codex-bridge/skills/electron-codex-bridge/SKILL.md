@@ -12,11 +12,22 @@ This plugin connects Codex to a local Electron app through two development-only 
 
 ## Use
 
-1. Prefer `electron_bridge_health` and `electron_bridge_list_windows` to confirm the main-process bridge is running.
-2. Use `electron_cdp_list_targets` to find BrowserWindow renderer targets.
+1. Start with `electron_orchestrator_inspect` for the standard app snapshot. It combines bridge health, BrowserWindow list, CDP version, CDP targets, renderer probe, and optional screenshot.
+2. Use specific tools only when the orchestrator shows a narrower next step.
 3. Use CDP tools for visual/browser-window work: screenshot, click, type, and renderer evaluation.
 4. Use `electron_bridge_invoke` for safe main-process actions registered with `registerCodexBridgeHandler`.
 5. Treat `electron_cdp_evaluate` and `/renderer/execute-js` as development-only tools. Prefer app-defined bridge handlers when changing app state.
+
+## Orchestrator
+
+Use `electron_orchestrator_inspect` when the user asks for a broad Electron status check, debugging pass, or "connect Codex to my Electron app."
+
+Useful arguments:
+
+- `urlIncludes`: choose a renderer target by URL or title substring.
+- `targetId`: choose an exact CDP target id.
+- `includeScreenshot`: defaults to true; set false for text-only checks.
+- `includeRendererProbe`: defaults to true; reads document title, URL, readyState, viewport, and active element.
 
 ## Electron App Setup
 

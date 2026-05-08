@@ -30,7 +30,7 @@
       "Write"
     ],
     "defaultPrompt": [
-      "List Electron windows and CDP targets.",
+      "Run the Electron orchestrator inspection.",
       "Capture the focused Electron BrowserWindow.",
       "Invoke my Electron bridge health check."
     ],
