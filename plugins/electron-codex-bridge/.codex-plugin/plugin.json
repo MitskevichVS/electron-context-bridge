@@ -1,7 +1,7 @@
 {
   "name": "electron-codex-bridge",
   "version": "0.1.0",
-  "description": "Connect Codex to an Electron app through a local MCP bridge, Electron main-process HTTP bridge, and Chrome DevTools Protocol.",
+  "description": "Connect Codex to an Electron app through local bridge tools, Chrome DevTools Protocol, and Electron best-practice guidance.",
   "author": {
     "name": "MitskevichVS",
     "email": "developer@example.com",
@@ -12,6 +12,10 @@
   "license": "MIT",
   "keywords": [
     "electron",
+    "contextbridge",
+    "ipc",
+    "security",
+    "react",
     "mcp",
     "debugging",
     "codex"
@@ -21,7 +25,7 @@
   "interface": {
     "displayName": "Electron Codex Bridge",
     "shortDescription": "Inspect and drive local Electron apps from Codex.",
-    "longDescription": "Adds MCP tools for Chrome DevTools Protocol targets and a local Electron main-process bridge so Codex can inspect windows, invoke explicit app handlers, evaluate renderer state in development, and capture BrowserWindow screenshots.",
+    "longDescription": "Adds MCP tools for Chrome DevTools Protocol targets and a local Electron main-process bridge so Codex can inspect windows, invoke explicit app handlers, evaluate renderer state in development, and capture BrowserWindow screenshots. The bridge skill automatically applies Electron + React best-practice guidance for secure contextBridge, typed IPC, packaging, signing, and Playwright testing workflows.",
     "developerName": "MitskevichVS",
     "category": "Developer Tools",
     "capabilities": [
@@ -31,6 +35,7 @@
     ],
     "defaultPrompt": [
       "Run the Electron orchestrator inspection.",
+      "Audit my Electron app against best practices.",
       "Capture the focused Electron BrowserWindow.",
       "Invoke my Electron bridge health check."
     ],

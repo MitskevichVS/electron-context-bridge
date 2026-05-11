@@ -7,6 +7,7 @@ This repo packages `electron-codex-bridge`, a Codex plugin that exposes MCP tool
 - Chrome DevTools Protocol access to Electron `BrowserWindow` renderer targets.
 - A local Electron main-process bridge for explicit, allowlisted app actions.
 - Browser-window operations such as listing targets, screenshots, clicks, typing, and renderer evaluation.
+- Electron + React best-practice guidance for secure `contextBridge`, typed IPC, packaging, signing, and testing.
 
 Use it as a local development bridge. Do not ship the bridge enabled in production builds.
 
@@ -29,6 +30,11 @@ plugins/
     skills/
       electron-codex-bridge/
         SKILL.md
+      electron-best-practices/
+        SKILL.md
+        assets/
+        references/
+        scripts/
     assets/
 ```
 
@@ -39,6 +45,7 @@ Important files:
 - `plugins/electron-codex-bridge/.mcp.json` tells Codex how to launch the MCP server.
 - `plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs` is the MCP server.
 - `plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts` is the optional Electron main-process bridge example.
+- `plugins/electron-codex-bridge/skills/electron-best-practices/SKILL.md` adds secure Electron + React development guidance and companion references/scripts.
 
 ## How Codex Finds The Plugin
 
@@ -77,6 +84,13 @@ The CDP tools talk to Electron's Chromium debugging port.
 The bridge tools talk to a small HTTP server that you explicitly start inside your Electron main process.
 
 Start with `electron_orchestrator_inspect` for the usual workflow. It checks the main-process bridge, lists BrowserWindows, lists CDP targets, probes the selected renderer, and can attach a screenshot in one response.
+
+The plugin also contributes two Codex skills:
+
+- `electron-codex-bridge`: inspect, debug, and drive a local Electron app through CDP and the development bridge.
+- `electron-best-practices`: guide secure Electron + React implementation, including `contextBridge`, typed IPC, CSP, packaging, signing, updates, and Playwright testing.
+
+The bridge skill loads `electron-best-practices` as a required companion, so every `electron-codex-bridge` workflow automatically carries the best-practice guidance.
 
 ## Electron App Setup
 

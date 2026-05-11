@@ -6,6 +6,7 @@ It contributes:
 
 - an MCP stdio server at `scripts/electron-codex-bridge.mjs`
 - a Codex skill at `skills/electron-codex-bridge/SKILL.md`
+- an Electron best-practices skill at `skills/electron-best-practices/SKILL.md`
 - an Electron main-process bridge example at `scripts/electron-main-bridge-example.ts`
 
 ## MCP Tools
@@ -57,3 +58,10 @@ The MCP server reads:
 - `CODEX_ELECTRON_BRIDGE_TOKEN`, optional bearer/header token
 
 Keep the bridge local-only and development-only.
+
+## Skills
+
+- `electron-codex-bridge`: inspect, debug, and control a local Electron app during development.
+- `electron-best-practices`: apply secure Electron + React patterns for `contextBridge`, typed IPC, CSP, packaging, code signing, updates, and Playwright testing.
+
+The bridge skill loads `electron-best-practices` as a required companion, so prompts that use `electron-codex-bridge` automatically apply the best-practice guidance too.

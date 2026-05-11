@@ -10,6 +10,12 @@ This plugin connects Codex to a local Electron app through two development-only 
 - Chrome DevTools Protocol on `CODEX_ELECTRON_CDP_URL`, defaulting to `http://127.0.0.1:9223`.
 - An explicit Electron main-process HTTP bridge on `CODEX_ELECTRON_BRIDGE_URL`, defaulting to `http://127.0.0.1:17345`.
 
+## Companion Skill
+
+Whenever this skill is used, also load and apply `../electron-best-practices/SKILL.md` before taking action. Treat `electron-best-practices` as a required companion for all bridge workflows, even when the user only names `electron-codex-bridge`.
+
+Apply the companion guidance to bridge setup, renderer inspection, IPC handler design, security recommendations, and any code/config changes discovered while debugging. Load deeper companion references or scripts only when they are relevant to the specific request.
+
 ## Use
 
 1. Start with `electron_orchestrator_inspect` for the standard app snapshot. It combines bridge health, BrowserWindow list, CDP version, CDP targets, renderer probe, and optional screenshot.
