@@ -128,6 +128,10 @@ app.whenReady().then(() => {
 });
 ```
 
+The bridge requires `CODEX_ELECTRON_BRIDGE_TOKEN` by default when `ENABLE_CODEX_BRIDGE=1`.
+For short-lived local debugging only, you can opt out explicitly with
+`allowUnauthenticated: true` or `CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED=1`.
+
 Run your Electron app with:
 
 ```bash
@@ -156,9 +160,10 @@ Defaults:
 
 - `CODEX_ELECTRON_CDP_URL`: `http://127.0.0.1:9223`
 - `CODEX_ELECTRON_BRIDGE_URL`: `http://127.0.0.1:17345`
-- `CODEX_ELECTRON_BRIDGE_TOKEN`: empty, meaning no bridge auth header
+- `CODEX_ELECTRON_BRIDGE_TOKEN`: empty, meaning no bridge auth header is sent
 
-If you set `CODEX_ELECTRON_BRIDGE_TOKEN` in the Electron app, set the same value for Codex's MCP server environment.
+The Electron main-process bridge requires a token unless you explicitly opt out.
+Set the same `CODEX_ELECTRON_BRIDGE_TOKEN` in the Electron app and Codex's MCP server environment.
 
 ## Using It In Codex
 
@@ -242,7 +247,7 @@ Use this bridge only for local development.
 Recommended constraints:
 
 - bind only to `127.0.0.1`
-- require `CODEX_ELECTRON_BRIDGE_TOKEN`
+- keep `CODEX_ELECTRON_BRIDGE_TOKEN` required unless you explicitly opt out for short-lived local debugging
 - keep handlers allowlisted
 - keep `allowExecuteJavaScript` disabled unless actively debugging
 - never enable this bridge in packaged production apps
@@ -265,16 +270,17 @@ If that fails:
 
 Check whether the main-process bridge is reachable:
 
-```text
-http://127.0.0.1:17345/health
+```bash
+curl -H "x-codex-bridge-token: dev-secret" http://127.0.0.1:17345/health
 ```
 
 If that fails:
 
 - confirm the app was started with `ENABLE_CODEX_BRIDGE=1`
 - confirm `startCodexBridge()` is called in the main process
+- confirm `CODEX_ELECTRON_BRIDGE_TOKEN` is set, or that unauthenticated mode was explicitly enabled
 - confirm the bridge port is `17345`
-- if using a token, confirm Codex and Electron use the same `CODEX_ELECTRON_BRIDGE_TOKEN`
+- when authenticated mode is enabled, confirm Codex and Electron use the same `CODEX_ELECTRON_BRIDGE_TOKEN`
 
 If Codex does not show the plugin:
 

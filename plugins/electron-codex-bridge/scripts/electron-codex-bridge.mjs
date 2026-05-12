@@ -590,7 +590,10 @@ async function orchestratorInspect(args) {
       url: baseUrl(args.cdpUrl, DEFAULT_CDP_URL)
     },
     bridge: {
-      url: baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL)
+      url: baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL),
+      auth: {
+        tokenConfigured: Boolean(BRIDGE_TOKEN)
+      }
     },
     notes: []
   };
@@ -621,6 +624,12 @@ async function orchestratorInspect(args) {
 
   if (!bridgeHealth.ok) {
     report.notes.push("The main-process bridge is not reachable. Confirm ENABLE_CODEX_BRIDGE=1 and startCodexBridge() are active.");
+  }
+
+  if (!BRIDGE_TOKEN) {
+    report.notes.push(
+      "No CODEX_ELECTRON_BRIDGE_TOKEN is configured for this MCP server. Authenticated bridge requests will fail unless the Electron bridge explicitly allows unauthenticated local access."
+    );
   }
 
   if (args.includeRendererProbe !== false) {

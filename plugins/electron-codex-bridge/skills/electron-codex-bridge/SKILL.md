@@ -52,14 +52,18 @@ startCodexBridge({
 });
 ```
 
+The bridge requires `CODEX_ELECTRON_BRIDGE_TOKEN` by default. Only use
+`allowUnauthenticated: true` or `CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED=1`
+for short-lived local debugging.
+
 Start the app with:
 
 ```bash
 ENABLE_CODEX_BRIDGE=1 CODEX_ELECTRON_BRIDGE_TOKEN=dev-secret npm run dev
 ```
 
-Set the same token for the MCP server environment when token auth is enabled.
+Set the same token for the MCP server environment.
 
 ## Security
 
-Use this only in local development. Bind to `127.0.0.1`, use `CODEX_ELECTRON_BRIDGE_TOKEN`, keep bridge handlers allowlisted, and do not ship the bridge in production builds.
+Use this only in local development. Bind to `127.0.0.1`, require `CODEX_ELECTRON_BRIDGE_TOKEN`, keep bridge handlers allowlisted, and do not ship the bridge in production builds.

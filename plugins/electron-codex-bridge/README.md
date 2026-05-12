@@ -45,6 +45,10 @@ app.whenReady().then(() => {
 });
 ```
 
+The bridge requires `CODEX_ELECTRON_BRIDGE_TOKEN` by default. For short-lived
+local debugging only, opt out explicitly with `allowUnauthenticated: true` or
+`CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED=1`.
+
 Then run your app with:
 
 ```bash
@@ -55,7 +59,7 @@ The MCP server reads:
 
 - `CODEX_ELECTRON_CDP_URL`, default `http://127.0.0.1:9223`
 - `CODEX_ELECTRON_BRIDGE_URL`, default `http://127.0.0.1:17345`
-- `CODEX_ELECTRON_BRIDGE_TOKEN`, optional bearer/header token
+- `CODEX_ELECTRON_BRIDGE_TOKEN`, bearer/header token for authenticated bridge requests
 
 Keep the bridge local-only and development-only.
 

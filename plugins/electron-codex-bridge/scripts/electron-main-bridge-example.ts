@@ -1,4 +1,5 @@
 import http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { URL } from "node:url";
 import { app, BrowserWindow } from "electron";
 
@@ -8,6 +9,7 @@ export type CodexBridgeOptions = {
   host?: string;
   port?: number;
   token?: string;
+  allowUnauthenticated?: boolean;
   allowExecuteJavaScript?: boolean;
 };
 
@@ -23,14 +25,25 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
   const host = options.host || "127.0.0.1";
   const port = options.port || Number(process.env.CODEX_ELECTRON_BRIDGE_PORT || 17345);
   const token = options.token || process.env.CODEX_ELECTRON_BRIDGE_TOKEN || "";
+  const allowUnauthenticated =
+    options.allowUnauthenticated === true ||
+    process.env.CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED === "1";
   const allowExecuteJavaScript = options.allowExecuteJavaScript === true;
+
+  if (!token && !allowUnauthenticated) {
+    throw new Error(
+      "Codex bridge auth token is required. Set CODEX_ELECTRON_BRIDGE_TOKEN, " +
+        "or pass allowUnauthenticated: true for local development only. " +
+        "CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED=1 is also available for short-lived local debugging."
+    );
+  }
 
   registerCodexBridgeHandler("app.getVersion", () => app.getVersion());
   registerCodexBridgeHandler("app.getPath", (name) => app.getPath(String(name) as Parameters<typeof app.getPath>[0]));
 
   const server = http.createServer(async (req, res) => {
     try {
-      if (token && !isAuthorized(req, token)) {
+      if (!allowUnauthenticated && !isAuthorized(req, token)) {
         sendJson(res, 401, { error: "Unauthorized" });
         return;
       }
@@ -38,7 +51,11 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
       const url = new URL(req.url || "/", `http://${host}:${port}`);
 
       if (req.method === "GET" && url.pathname === "/health") {
-        sendJson(res, 200, { ok: true, appVersion: app.getVersion() });
+        sendJson(res, 200, {
+          ok: true,
+          appVersion: app.getVersion(),
+          auth: { required: !allowUnauthenticated }
+        });
         return;
       }
 
@@ -134,7 +151,19 @@ function findWindow(windowId: unknown): BrowserWindow {
 function isAuthorized(req: http.IncomingMessage, token: string): boolean {
   const authorization = req.headers.authorization || "";
   const headerToken = req.headers["x-codex-bridge-token"];
-  return authorization === `Bearer ${token}` || headerToken === token;
+  return (
+    constantTimeEquals(authorization, `Bearer ${token}`) ||
+    (typeof headerToken === "string" && constantTimeEquals(headerToken, token))
+  );
+}
+
+function constantTimeEquals(actual: string, expected: string): boolean {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return (
+    actualBuffer.byteLength === expectedBuffer.byteLength &&
+    timingSafeEqual(actualBuffer, expectedBuffer)
+  );
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
