@@ -11,11 +11,21 @@ export type CodexBridgeOptions = {
   token?: string;
   allowUnauthenticated?: boolean;
   allowExecuteJavaScript?: boolean;
+  maxBodyBytes?: number;
 };
 
 const handlers = new Map<string, BridgeHandler>();
+const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+const MAX_HANDLER_NAME_LENGTH = 120;
+const MAX_CHANNEL_NAME_LENGTH = 160;
 
 export function registerCodexBridgeHandler(name: string, handler: BridgeHandler): void {
+  if (name.trim() === "" || name.length > MAX_HANDLER_NAME_LENGTH) {
+    throw new Error(`Codex bridge handler name must be 1-${MAX_HANDLER_NAME_LENGTH} characters.`);
+  }
+  if (typeof handler !== "function") {
+    throw new Error("Codex bridge handler must be a function.");
+  }
   handlers.set(name, handler);
 }
 
@@ -29,6 +39,7 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
     options.allowUnauthenticated === true ||
     process.env.CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED === "1";
   const allowExecuteJavaScript = options.allowExecuteJavaScript === true;
+  const maxBodyBytes = resolveMaxBodyBytes(options.maxBodyBytes);
 
   if (!token && !allowUnauthenticated) {
     throw new Error(
@@ -65,21 +76,24 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
       }
 
       if (req.method === "POST" && url.pathname === "/invoke") {
-        const body = await readJsonBody(req);
-        const name = String(body.name || "");
+        const body = await readJsonBody(req, maxBodyBytes);
+        const name = requireNonEmptyString(body.name, "name", MAX_HANDLER_NAME_LENGTH);
         const handler = handlers.get(name);
         if (!handler) {
           sendJson(res, 404, { error: `No Codex bridge handler is registered for '${name}'.` });
           return;
         }
 
-        const args = Array.isArray(body.args) ? body.args : [];
+        const args = requireArray(
+          Object.prototype.hasOwnProperty.call(body, "args") ? body.args : [],
+          "args"
+        );
         sendJson(res, 200, { result: await handler(...args) });
         return;
       }
 
       if (req.method === "POST" && url.pathname === "/window/focus") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, maxBodyBytes);
         const win = findWindow(body.windowId);
         win.focus();
         sendJson(res, 200, { ok: true, window: describeWindow(win) });
@@ -87,9 +101,10 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
       }
 
       if (req.method === "POST" && url.pathname === "/window/devtools") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, maxBodyBytes);
         const win = findWindow(body.windowId);
-        if (body.open === false) {
+        const open = requireOptionalBoolean(body.open, "open");
+        if (open === false) {
           win.webContents.closeDevTools();
         } else {
           win.webContents.openDevTools({ mode: "detach" });
@@ -99,9 +114,10 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
       }
 
       if (req.method === "POST" && url.pathname === "/renderer/send") {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, maxBodyBytes);
         const win = findWindow(body.windowId);
-        win.webContents.send(String(body.channel), body.payload);
+        const channel = requireNonEmptyString(body.channel, "channel", MAX_CHANNEL_NAME_LENGTH);
+        win.webContents.send(channel, body.payload);
         sendJson(res, 200, { ok: true });
         return;
       }
@@ -112,15 +128,21 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
           return;
         }
 
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, maxBodyBytes);
         const win = findWindow(body.windowId);
-        const result = await win.webContents.executeJavaScript(String(body.expression), true);
+        const expression = requireNonEmptyString(body.expression, "expression", maxBodyBytes);
+        const result = await win.webContents.executeJavaScript(expression, true);
         sendJson(res, 200, { result });
         return;
       }
 
       sendJson(res, 404, { error: "Not found" });
     } catch (error) {
+      if (error instanceof BridgeRequestError) {
+        sendJson(res, error.status, { error: error.message });
+        return;
+      }
+
       sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -142,7 +164,7 @@ function describeWindow(win: BrowserWindow) {
 }
 
 function findWindow(windowId: unknown): BrowserWindow {
-  const id = Number(windowId);
+  const id = requirePositiveInteger(windowId, "windowId");
   const win = BrowserWindow.fromId(id);
   if (!win) throw new Error(`No BrowserWindow found for id ${id}.`);
   return win;
@@ -166,14 +188,106 @@ function constantTimeEquals(actual: string, expected: string): boolean {
   );
 }
 
-async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+class BridgeRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message);
+    Object.setPrototypeOf(this, BridgeRequestError.prototype);
+  }
+}
+
+function resolveMaxBodyBytes(optionValue: number | undefined): number {
+  const envValue = process.env.CODEX_ELECTRON_BRIDGE_MAX_BODY_BYTES;
+  const value = optionValue ?? (envValue ? Number(envValue) : DEFAULT_MAX_BODY_BYTES);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error("Codex bridge maxBodyBytes must be a positive safe integer.");
+  }
+  return value;
+}
+
+async function readJsonBody(
+  req: http.IncomingMessage,
+  maxBodyBytes: number
+): Promise<Record<string, unknown>> {
+  const contentLength = Array.isArray(req.headers["content-length"])
+    ? req.headers["content-length"][0]
+    : req.headers["content-length"];
+
+  if (contentLength !== undefined) {
+    const declaredLength = Number(contentLength);
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) {
+      throw new BridgeRequestError(400, "Invalid content-length header.");
+    }
+    if (declaredLength > maxBodyBytes) {
+      throw new BridgeRequestError(413, `Request body exceeds ${maxBodyBytes} bytes.`);
+    }
+  }
+
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > maxBodyBytes) {
+      throw new BridgeRequestError(413, `Request body exceeds ${maxBodyBytes} bytes.`);
+    }
+    chunks.push(buffer);
   }
 
   const raw = Buffer.concat(chunks).toString("utf8").trim();
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new BridgeRequestError(400, "Request body must be valid JSON.");
+  }
+
+  if (!isJsonObject(parsed)) {
+    throw new BridgeRequestError(400, "Request body must be a JSON object.");
+  }
+
+  return parsed;
+}
+
+function requireNonEmptyString(value: unknown, fieldName: string, maxLength: number): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new BridgeRequestError(400, `${fieldName} must be a non-empty string.`);
+  }
+  if (value.length > maxLength) {
+    throw new BridgeRequestError(400, `${fieldName} must be at most ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function requireArray(value: unknown, fieldName: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new BridgeRequestError(400, `${fieldName} must be an array.`);
+  }
+  return value;
+}
+
+function requirePositiveInteger(value: unknown, fieldName: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new BridgeRequestError(400, `${fieldName} must be a positive integer.`);
+  }
+  return value;
+}
+
+function requireOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") {
+    throw new BridgeRequestError(400, `${fieldName} must be a boolean.`);
+  }
+  return value;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {

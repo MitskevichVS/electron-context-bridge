@@ -131,6 +131,8 @@ app.whenReady().then(() => {
 The bridge requires `CODEX_ELECTRON_BRIDGE_TOKEN` by default when `ENABLE_CODEX_BRIDGE=1`.
 For short-lived local debugging only, you can opt out explicitly with
 `allowUnauthenticated: true` or `CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED=1`.
+JSON request bodies are limited to 1 MiB by default. Override with
+`maxBodyBytes` or `CODEX_ELECTRON_BRIDGE_MAX_BODY_BYTES`.
 
 Run your Electron app with:
 
@@ -145,6 +147,8 @@ ENABLE_CODEX_BRIDGE=1 CODEX_BRIDGE_ALLOW_EVAL=1 CODEX_ELECTRON_BRIDGE_TOKEN=dev-
 ```
 
 Prefer allowlisted bridge handlers over renderer evaluation for app-specific actions.
+Malformed JSON, wrong argument types, and oversized bodies return `400` or `413`
+from the Electron main-process bridge.
 
 ## MCP Environment Variables
 

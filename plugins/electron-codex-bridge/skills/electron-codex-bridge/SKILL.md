@@ -55,6 +55,8 @@ startCodexBridge({
 The bridge requires `CODEX_ELECTRON_BRIDGE_TOKEN` by default. Only use
 `allowUnauthenticated: true` or `CODEX_ELECTRON_BRIDGE_ALLOW_UNAUTHENTICATED=1`
 for short-lived local debugging.
+JSON request bodies are limited to 1 MiB by default. Override with
+`maxBodyBytes` or `CODEX_ELECTRON_BRIDGE_MAX_BODY_BYTES`.
 
 Start the app with:
 

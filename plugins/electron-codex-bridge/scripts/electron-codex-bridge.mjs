@@ -10,6 +10,11 @@ const DEFAULT_CDP_URL = process.env.CODEX_ELECTRON_CDP_URL || "http://127.0.0.1:
 const DEFAULT_BRIDGE_URL =
   process.env.CODEX_ELECTRON_BRIDGE_URL || "http://127.0.0.1:17345";
 const BRIDGE_TOKEN = process.env.CODEX_ELECTRON_BRIDGE_TOKEN || "";
+const MAX_BRIDGE_PATH_LENGTH = 240;
+const MAX_HANDLER_NAME_LENGTH = 120;
+const MAX_TARGET_SELECTOR_LENGTH = 500;
+const MAX_RENDERER_EXPRESSION_LENGTH = 256 * 1024;
+const MAX_TYPED_TEXT_LENGTH = 64 * 1024;
 
 const tools = [
   {
@@ -20,18 +25,24 @@ const tools = [
       properties: {
         cdpUrl: {
           type: "string",
+          format: "uri",
           description: "CDP base URL. Defaults to CODEX_ELECTRON_CDP_URL or http://127.0.0.1:9223."
         },
         bridgeUrl: {
           type: "string",
+          format: "uri",
           description: "Bridge base URL. Defaults to CODEX_ELECTRON_BRIDGE_URL or http://127.0.0.1:17345."
         },
         targetId: {
           type: "string",
+          minLength: 1,
+          maxLength: MAX_TARGET_SELECTOR_LENGTH,
           description: "Renderer target id from electron_cdp_list_targets."
         },
         urlIncludes: {
           type: "string",
+          minLength: 1,
+          maxLength: MAX_TARGET_SELECTOR_LENGTH,
           description: "Choose the first target whose URL or title includes this text."
         },
         includeRendererProbe: {
@@ -66,6 +77,7 @@ const tools = [
       properties: {
         cdpUrl: {
           type: "string",
+          format: "uri",
           description: "CDP base URL. Defaults to CODEX_ELECTRON_CDP_URL or http://127.0.0.1:9223."
         }
       }
@@ -79,6 +91,7 @@ const tools = [
       properties: {
         cdpUrl: {
           type: "string",
+          format: "uri",
           description: "CDP base URL. Defaults to CODEX_ELECTRON_CDP_URL or http://127.0.0.1:9223."
         }
       }
@@ -91,10 +104,10 @@ const tools = [
       type: "object",
       required: ["expression"],
       properties: {
-        cdpUrl: { type: "string" },
-        targetId: { type: "string", description: "Target id from electron_cdp_list_targets." },
-        urlIncludes: { type: "string", description: "Choose the first target whose URL or title includes this text." },
-        expression: { type: "string", description: "JavaScript expression to evaluate in the renderer." },
+        cdpUrl: { type: "string", format: "uri" },
+        targetId: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH, description: "Target id from electron_cdp_list_targets." },
+        urlIncludes: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH, description: "Choose the first target whose URL or title includes this text." },
+        expression: { type: "string", minLength: 1, maxLength: MAX_RENDERER_EXPRESSION_LENGTH, description: "JavaScript expression to evaluate in the renderer." },
         awaitPromise: { type: "boolean", default: true },
         returnByValue: { type: "boolean", default: true }
       }
@@ -106,9 +119,9 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        cdpUrl: { type: "string" },
-        targetId: { type: "string" },
-        urlIncludes: { type: "string" },
+        cdpUrl: { type: "string", format: "uri" },
+        targetId: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH },
+        urlIncludes: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH },
         format: { type: "string", enum: ["png", "jpeg"], default: "png" },
         quality: { type: "number", minimum: 0, maximum: 100, description: "JPEG quality only." }
       }
@@ -121,9 +134,9 @@ const tools = [
       type: "object",
       required: ["x", "y"],
       properties: {
-        cdpUrl: { type: "string" },
-        targetId: { type: "string" },
-        urlIncludes: { type: "string" },
+        cdpUrl: { type: "string", format: "uri" },
+        targetId: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH },
+        urlIncludes: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH },
         x: { type: "number" },
         y: { type: "number" },
         button: { type: "string", enum: ["left", "middle", "right"], default: "left" },
@@ -138,10 +151,10 @@ const tools = [
       type: "object",
       required: ["text"],
       properties: {
-        cdpUrl: { type: "string" },
-        targetId: { type: "string" },
-        urlIncludes: { type: "string" },
-        text: { type: "string" }
+        cdpUrl: { type: "string", format: "uri" },
+        targetId: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH },
+        urlIncludes: { type: "string", minLength: 1, maxLength: MAX_TARGET_SELECTOR_LENGTH },
+        text: { type: "string", minLength: 1, maxLength: MAX_TYPED_TEXT_LENGTH }
       }
     }
   },
@@ -153,6 +166,7 @@ const tools = [
       properties: {
         bridgeUrl: {
           type: "string",
+          format: "uri",
           description: "Bridge base URL. Defaults to CODEX_ELECTRON_BRIDGE_URL or http://127.0.0.1:17345."
         }
       }
@@ -164,7 +178,7 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        bridgeUrl: { type: "string" }
+        bridgeUrl: { type: "string", format: "uri" }
       }
     }
   },
@@ -175,8 +189,8 @@ const tools = [
       type: "object",
       required: ["name"],
       properties: {
-        bridgeUrl: { type: "string" },
-        name: { type: "string", description: "Allowlisted bridge handler name." },
+        bridgeUrl: { type: "string", format: "uri" },
+        name: { type: "string", minLength: 1, maxLength: MAX_HANDLER_NAME_LENGTH, description: "Allowlisted bridge handler name." },
         args: { type: "array", items: {}, default: [] }
       }
     }
@@ -188,8 +202,8 @@ const tools = [
       type: "object",
       required: ["path"],
       properties: {
-        bridgeUrl: { type: "string" },
-        path: { type: "string", description: "Absolute bridge path, for example /windows." },
+        bridgeUrl: { type: "string", format: "uri" },
+        path: { type: "string", minLength: 1, maxLength: MAX_BRIDGE_PATH_LENGTH, description: "Absolute bridge path, for example /windows." },
         method: { type: "string", enum: ["GET", "POST"], default: "GET" },
         body: { description: "JSON-serializable request body." }
       }
@@ -197,8 +211,18 @@ const tools = [
   }
 ];
 
-function baseUrl(value, fallback) {
-  return String(value || fallback).replace(/\/+$/, "");
+function baseUrl(value, fallback, fieldName = "url") {
+  const url = String(value || fallback).trim().replace(/\/+$/, "");
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`${fieldName} must be a valid URL.`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${fieldName} must use http or https.`);
+  }
+  return url;
 }
 
 function bridgeHeaders(extra = {}) {
@@ -208,6 +232,70 @@ function bridgeHeaders(extra = {}) {
     headers["x-codex-bridge-token"] = BRIDGE_TOKEN;
   }
   return headers;
+}
+
+function requireObject(value, fieldName) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object.`);
+  }
+  return value;
+}
+
+function requireString(value, fieldName, maxLength) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${fieldName} must be a non-empty string.`);
+  }
+  if (value.length > maxLength) {
+    throw new Error(`${fieldName} must be at most ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function optionalBoolean(value, fieldName, defaultValue) {
+  if (value === undefined) return defaultValue;
+  if (typeof value !== "boolean") {
+    throw new Error(`${fieldName} must be a boolean.`);
+  }
+  return value;
+}
+
+function requireFiniteNumber(value, fieldName) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${fieldName} must be a finite number.`);
+  }
+  return value;
+}
+
+function optionalPositiveInteger(value, fieldName, defaultValue) {
+  if (value === undefined) return defaultValue;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${fieldName} must be a positive integer.`);
+  }
+  return value;
+}
+
+function requireArray(value, fieldName) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array.`);
+  }
+  return value;
+}
+
+function requireEnum(value, fieldName, allowedValues, defaultValue) {
+  const resolved = value === undefined ? defaultValue : value;
+  if (!allowedValues.includes(resolved)) {
+    throw new Error(`${fieldName} must be one of: ${allowedValues.join(", ")}.`);
+  }
+  return resolved;
+}
+
+function validateTargetSelectorArgs(args) {
+  if (args.targetId !== undefined) {
+    args.targetId = requireString(args.targetId, "targetId", MAX_TARGET_SELECTOR_LENGTH);
+  }
+  if (args.urlIncludes !== undefined) {
+    args.urlIncludes = requireString(args.urlIncludes, "urlIncludes", MAX_TARGET_SELECTOR_LENGTH);
+  }
 }
 
 async function request(url, options = {}) {
@@ -247,12 +335,12 @@ async function request(url, options = {}) {
 }
 
 async function getCdpVersion(args) {
-  const cdpUrl = baseUrl(args.cdpUrl, DEFAULT_CDP_URL);
+  const cdpUrl = baseUrl(args.cdpUrl, DEFAULT_CDP_URL, "cdpUrl");
   return (await request(`${cdpUrl}/json/version`)).body;
 }
 
 async function listCdpTargets(args) {
-  const cdpUrl = baseUrl(args.cdpUrl, DEFAULT_CDP_URL);
+  const cdpUrl = baseUrl(args.cdpUrl, DEFAULT_CDP_URL, "cdpUrl");
   const payload = (await request(`${cdpUrl}/json`)).body;
   if (!Array.isArray(payload)) {
     throw new Error(`Expected ${cdpUrl}/json to return an array.`);
@@ -261,6 +349,7 @@ async function listCdpTargets(args) {
 }
 
 async function selectTarget(args) {
+  validateTargetSelectorArgs(args);
   const targets = await listCdpTargets(args);
   const debuggable = targets.filter((target) => target.webSocketDebuggerUrl);
   let candidates = debuggable;
@@ -516,12 +605,16 @@ function encodeWebSocketFrame(payload, opcode) {
 }
 
 async function cdpEvaluate(args) {
+  args.expression = requireString(args.expression, "expression", MAX_RENDERER_EXPRESSION_LENGTH);
+  args.awaitPromise = optionalBoolean(args.awaitPromise, "awaitPromise", true);
+  args.returnByValue = optionalBoolean(args.returnByValue, "returnByValue", true);
+
   return withCdpTarget(args, async (call, target) => {
     await call("Runtime.enable");
     const result = await call("Runtime.evaluate", {
       expression: args.expression,
-      awaitPromise: args.awaitPromise !== false,
-      returnByValue: args.returnByValue !== false,
+      awaitPromise: args.awaitPromise,
+      returnByValue: args.returnByValue,
       userGesture: true
     });
     return { target: summarizeTarget(target), result };
@@ -529,9 +622,17 @@ async function cdpEvaluate(args) {
 }
 
 async function cdpScreenshot(args) {
+  args.format = requireEnum(args.format, "format", ["png", "jpeg"], "png");
+  if (args.quality !== undefined) {
+    args.quality = requireFiniteNumber(args.quality, "quality");
+    if (args.quality < 0 || args.quality > 100) {
+      throw new Error("quality must be between 0 and 100.");
+    }
+  }
+
   return withCdpTarget(args, async (call, target) => {
     await call("Page.enable");
-    const format = args.format || "png";
+    const format = args.format;
     const params = { format, captureBeyondViewport: true };
     if (format === "jpeg" && typeof args.quality === "number") {
       params.quality = args.quality;
@@ -546,9 +647,14 @@ async function cdpScreenshot(args) {
 }
 
 async function cdpClick(args) {
+  args.x = requireFiniteNumber(args.x, "x");
+  args.y = requireFiniteNumber(args.y, "y");
+  args.button = requireEnum(args.button, "button", ["left", "middle", "right"], "left");
+  args.clickCount = optionalPositiveInteger(args.clickCount, "clickCount", 1);
+
   return withCdpTarget(args, async (call, target) => {
-    const button = args.button || "left";
-    const clickCount = args.clickCount || 1;
+    const button = args.button;
+    const clickCount = args.clickCount;
     await call("Input.dispatchMouseEvent", {
       type: "mousePressed",
       x: args.x,
@@ -568,6 +674,8 @@ async function cdpClick(args) {
 }
 
 async function cdpType(args) {
+  args.text = requireString(args.text, "text", MAX_TYPED_TEXT_LENGTH);
+
   return withCdpTarget(args, async (call, target) => {
     await call("Input.insertText", { text: args.text });
     return { target: summarizeTarget(target), insertedTextLength: args.text.length };
@@ -584,13 +692,16 @@ function summarizeTarget(target) {
 }
 
 async function orchestratorInspect(args) {
+  args.includeRendererProbe = optionalBoolean(args.includeRendererProbe, "includeRendererProbe", true);
+  args.includeScreenshot = optionalBoolean(args.includeScreenshot, "includeScreenshot", true);
+
   const report = {
     generatedAt: new Date().toISOString(),
     cdp: {
-      url: baseUrl(args.cdpUrl, DEFAULT_CDP_URL)
+      url: baseUrl(args.cdpUrl, DEFAULT_CDP_URL, "cdpUrl")
     },
     bridge: {
-      url: baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL),
+      url: baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL, "bridgeUrl"),
       auth: {
         tokenConfigured: Boolean(BRIDGE_TOKEN)
       }
@@ -632,7 +743,7 @@ async function orchestratorInspect(args) {
     );
   }
 
-  if (args.includeRendererProbe !== false) {
+  if (args.includeRendererProbe) {
     const rendererProbe = await attempt(() =>
       cdpEvaluate({
         ...args,
@@ -644,7 +755,7 @@ async function orchestratorInspect(args) {
     report.cdp.rendererProbe = unwrapAttempt(rendererProbe, unwrapRuntimeEvaluation);
   }
 
-  if (args.includeScreenshot !== false) {
+  if (args.includeScreenshot) {
     const screenshot = await attempt(() =>
       cdpScreenshot({
         ...args,
@@ -737,19 +848,33 @@ function errorMessage(error) {
 }
 
 async function bridgeRequest(args) {
-  const bridgeUrl = baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL);
-  const rawPath = args.path || "/";
+  const bridgeUrl = baseUrl(args.bridgeUrl, DEFAULT_BRIDGE_URL, "bridgeUrl");
+  const rawPath = args.path === undefined
+    ? "/"
+    : requireString(args.path, "path", MAX_BRIDGE_PATH_LENGTH);
   if (!rawPath.startsWith("/")) {
     throw new Error("Bridge path must start with '/'.");
   }
 
-  const method = args.method || "GET";
-  const hasBody = method !== "GET" && Object.prototype.hasOwnProperty.call(args, "body");
+  const method = requireEnum(args.method, "method", ["GET", "POST"], "GET");
+  if (method === "GET" && Object.prototype.hasOwnProperty.call(args, "body")) {
+    throw new Error("body is only supported for POST bridge requests.");
+  }
+
+  const hasBody = method === "POST" && Object.prototype.hasOwnProperty.call(args, "body");
   return request(`${bridgeUrl}${rawPath}`, {
     method,
     headers: bridgeHeaders(hasBody ? { "content-type": "application/json" } : {}),
-    body: hasBody ? JSON.stringify(args.body) : undefined
+    body: hasBody ? stringifyJsonBody(args.body) : undefined
   });
+}
+
+function stringifyJsonBody(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    throw new Error(`body must be JSON-serializable: ${errorMessage(error)}`);
+  }
 }
 
 async function callTool(name, args) {
@@ -786,13 +911,18 @@ async function callTool(name, args) {
       return textResult(await bridgeRequest({ ...args, path: "/health", method: "GET" }));
     case "electron_bridge_list_windows":
       return textResult(await bridgeRequest({ ...args, path: "/windows", method: "GET" }));
-    case "electron_bridge_invoke":
+    case "electron_bridge_invoke": {
+      const handlerName = requireString(args.name, "name", MAX_HANDLER_NAME_LENGTH);
+      const handlerArgs = Object.prototype.hasOwnProperty.call(args, "args")
+        ? requireArray(args.args, "args")
+        : [];
       return textResult(await bridgeRequest({
         bridgeUrl: args.bridgeUrl,
         path: "/invoke",
         method: "POST",
-        body: { name: args.name, args: args.args || [] }
+        body: { name: handlerName, args: handlerArgs }
       }));
+    }
     case "electron_bridge_request":
       return textResult(await bridgeRequest(args));
     default:
@@ -839,7 +969,9 @@ async function handleRequest(message) {
         send({ id, result: { tools } });
         break;
       case "tools/call": {
-        const result = await callTool(params.name, params.arguments || {});
+        const toolName = requireString(params.name, "name", MAX_HANDLER_NAME_LENGTH);
+        const toolArgs = params.arguments === undefined ? {} : requireObject(params.arguments, "arguments");
+        const result = await callTool(toolName, toolArgs);
         send({ id, result });
         break;
       }
