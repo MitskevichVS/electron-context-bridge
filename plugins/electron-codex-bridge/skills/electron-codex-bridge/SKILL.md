@@ -61,6 +61,8 @@ The bridge requires `CODEX_ELECTRON_BRIDGE_TOKEN` by default. Only use
 for short-lived local debugging.
 JSON request bodies are limited to 1 MiB by default. Override with
 `maxBodyBytes` or `CODEX_ELECTRON_BRIDGE_MAX_BODY_BYTES`.
+Bridge HTTP responses use `{ ok: true, data }` for successes and
+`{ ok: false, error: { code, message } }` for failures.
 
 Start the app with:
 

@@ -143,15 +143,14 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
   const server = http.createServer(async (req, res) => {
     try {
       if (!allowUnauthenticated && !isAuthorized(req, token)) {
-        sendJson(res, 401, { error: "Unauthorized" });
+        sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
         return;
       }
 
       const url = new URL(req.url || "/", `http://${host}:${port}`);
 
       if (req.method === "GET" && url.pathname === "/health") {
-        sendJson(res, 200, {
-          ok: true,
+        sendData(res, 200, {
           appVersion: app.getVersion(),
           auth: { required: !allowUnauthenticated }
         });
@@ -159,12 +158,12 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
       }
 
       if (req.method === "GET" && url.pathname === "/windows") {
-        sendJson(res, 200, BrowserWindow.getAllWindows().map(describeWindow));
+        sendData(res, 200, BrowserWindow.getAllWindows().map(describeWindow));
         return;
       }
 
       if (req.method === "GET" && url.pathname === "/handlers") {
-        sendJson(res, 200, describeHandlers());
+        sendData(res, 200, describeHandlers());
         return;
       }
 
@@ -173,7 +172,7 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
         const name = requireNonEmptyString(body.name, "name", MAX_HANDLER_NAME_LENGTH);
         const record = handlers.get(name);
         if (!record) {
-          sendJson(res, 404, { error: `No Codex bridge handler is registered for '${name}'.` });
+          sendError(res, 404, "HANDLER_NOT_FOUND", `No Codex bridge handler is registered for '${name}'.`);
           return;
         }
 
@@ -182,7 +181,11 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
           "args"
         );
         validateHandlerArgs(record.metadata.parameters, args);
-        sendJson(res, 200, { result: await record.handler(...args) });
+        try {
+          sendData(res, 200, await record.handler(...args));
+        } catch (error) {
+          sendError(res, 500, "HANDLER_ERROR", errorMessage(error));
+        }
         return;
       }
 
@@ -190,7 +193,7 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
         const body = await readJsonBody(req, maxBodyBytes);
         const win = findWindow(body.windowId);
         win.focus();
-        sendJson(res, 200, { ok: true, window: describeWindow(win) });
+        sendData(res, 200, { window: describeWindow(win) });
         return;
       }
 
@@ -203,7 +206,7 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
         } else {
           win.webContents.openDevTools({ mode: "detach" });
         }
-        sendJson(res, 200, { ok: true, window: describeWindow(win) });
+        sendData(res, 200, { window: describeWindow(win) });
         return;
       }
 
@@ -212,13 +215,13 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
         const win = findWindow(body.windowId);
         const channel = requireNonEmptyString(body.channel, "channel", MAX_CHANNEL_NAME_LENGTH);
         win.webContents.send(channel, body.payload);
-        sendJson(res, 200, { ok: true });
+        sendData(res, 200, { sent: true });
         return;
       }
 
       if (req.method === "POST" && url.pathname === "/renderer/execute-js") {
         if (!allowExecuteJavaScript) {
-          sendJson(res, 403, { error: "renderer/execute-js is disabled. Pass allowExecuteJavaScript: true in development only." });
+          sendError(res, 403, "EXECUTE_JAVASCRIPT_DISABLED", "renderer/execute-js is disabled. Pass allowExecuteJavaScript: true in development only.");
           return;
         }
 
@@ -226,18 +229,18 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
         const win = findWindow(body.windowId);
         const expression = requireNonEmptyString(body.expression, "expression", maxBodyBytes);
         const result = await win.webContents.executeJavaScript(expression, true);
-        sendJson(res, 200, { result });
+        sendData(res, 200, result);
         return;
       }
 
-      sendJson(res, 404, { error: "Not found" });
+      sendError(res, 404, "NOT_FOUND", "Not found");
     } catch (error) {
       if (error instanceof BridgeRequestError) {
-        sendJson(res, error.status, { error: error.message });
+        sendError(res, error.status, error.code, error.message);
         return;
       }
 
-      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+      sendError(res, 500, "INTERNAL_ERROR", errorMessage(error));
     }
   });
 
@@ -347,7 +350,7 @@ function expectedTypeLabel(type: CodexBridgeHandlerParameterType): string {
 function findWindow(windowId: unknown): BrowserWindow {
   const id = requirePositiveInteger(windowId, "windowId");
   const win = BrowserWindow.fromId(id);
-  if (!win) throw new Error(`No BrowserWindow found for id ${id}.`);
+  if (!win) throw new BridgeRequestError(404, `No BrowserWindow found for id ${id}.`, "WINDOW_NOT_FOUND");
   return win;
 }
 
@@ -372,10 +375,24 @@ function constantTimeEquals(actual: string, expected: string): boolean {
 class BridgeRequestError extends Error {
   constructor(
     readonly status: number,
-    message: string
+    message: string,
+    readonly code: string = bridgeErrorCodeForStatus(status)
   ) {
     super(message);
     Object.setPrototypeOf(this, BridgeRequestError.prototype);
+  }
+}
+
+function bridgeErrorCodeForStatus(status: number): string {
+  switch (status) {
+    case 413:
+      return "PAYLOAD_TOO_LARGE";
+    case 404:
+      return "NOT_FOUND";
+    case 403:
+      return "FORBIDDEN";
+    default:
+      return "INVALID_REQUEST";
   }
 }
 
@@ -633,6 +650,21 @@ function isJsonPrimitive(value: unknown): value is string | number | boolean | n
     typeof value === "number" ||
     typeof value === "boolean"
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function sendData(res: http.ServerResponse, status: number, data: unknown): void {
+  sendJson(res, status, { ok: true, data });
+}
+
+function sendError(res: http.ServerResponse, status: number, code: string, message: string): void {
+  sendJson(res, status, {
+    ok: false,
+    error: { code, message }
+  });
 }
 
 function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {

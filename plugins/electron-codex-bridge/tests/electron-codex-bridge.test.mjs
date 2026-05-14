@@ -40,7 +40,8 @@ test("main bridge refuses to start without token unless unauthenticated mode is 
     try {
       const response = await bridgeFetch(server, "/health");
       assert.equal(response.status, 200);
-      assert.equal(response.body.auth.required, false);
+      assert.equal(response.body.ok, true);
+      assert.equal(response.body.data.auth.required, false);
     } finally {
       await closeServer(server);
     }
@@ -64,14 +65,16 @@ test("main bridge enforces token auth and allows matching token", async () => {
 
     const unauthorized = await bridgeFetch(server, "/health");
     assert.equal(unauthorized.status, 401);
-    assert.equal(unauthorized.body.error, "Unauthorized");
+    assert.equal(unauthorized.body.ok, false);
+    assert.equal(unauthorized.body.error.code, "UNAUTHORIZED");
+    assert.equal(unauthorized.body.error.message, "Unauthorized");
 
     const authorized = await bridgeFetch(server, "/health", {
       headers: { "x-codex-bridge-token": "test-secret" }
     });
     assert.equal(authorized.status, 200);
     assert.equal(authorized.body.ok, true);
-    assert.equal(authorized.body.auth.required, true);
+    assert.equal(authorized.body.data.auth.required, true);
   } finally {
     await closeServer(server);
     await cleanup();
@@ -98,7 +101,8 @@ test("main bridge validates JSON bodies and invoke args", async () => {
       body: "{"
     });
     assert.equal(malformed.status, 400);
-    assert.match(malformed.body.error, /valid JSON/);
+    assert.equal(malformed.body.error.code, "INVALID_REQUEST");
+    assert.match(malformed.body.error.message, /valid JSON/);
 
     const badArgs = await bridgeFetch(server, "/invoke", {
       method: "POST",
@@ -106,7 +110,7 @@ test("main bridge validates JSON bodies and invoke args", async () => {
       body: JSON.stringify({ name: "app.getVersion", args: "not-array" })
     });
     assert.equal(badArgs.status, 400);
-    assert.match(badArgs.body.error, /args must be an array/);
+    assert.match(badArgs.body.error.message, /args must be an array/);
 
     const extraArgs = await bridgeFetch(server, "/invoke", {
       method: "POST",
@@ -114,7 +118,7 @@ test("main bridge validates JSON bodies and invoke args", async () => {
       body: JSON.stringify({ name: "app.getVersion", args: ["extra"] })
     });
     assert.equal(extraArgs.status, 400);
-    assert.match(extraArgs.body.error, /at most 0 value/);
+    assert.match(extraArgs.body.error.message, /at most 0 value/);
 
     const badWindowId = await bridgeFetch(server, "/window/focus", {
       method: "POST",
@@ -122,7 +126,7 @@ test("main bridge validates JSON bodies and invoke args", async () => {
       body: JSON.stringify({ windowId: "1" })
     });
     assert.equal(badWindowId.status, 400);
-    assert.match(badWindowId.body.error, /windowId must be a positive integer/);
+    assert.match(badWindowId.body.error.message, /windowId must be a positive integer/);
   } finally {
     await closeServer(server);
     await cleanup();
@@ -153,7 +157,8 @@ test("main bridge rejects oversized request bodies", async () => {
     });
 
     assert.equal(response.status, 413);
-    assert.match(response.body.error, /exceeds 8 bytes/);
+    assert.equal(response.body.error.code, "PAYLOAD_TOO_LARGE");
+    assert.match(response.body.error.message, /exceeds 8 bytes/);
   } finally {
     await closeServer(server);
     await cleanup();
@@ -188,12 +193,14 @@ test("main bridge lists registered handler metadata", async () => {
     });
 
     assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    const handlers = response.body.data;
     assert.deepEqual(
-      response.body.map((handler) => handler.name),
+      handlers.map((handler) => handler.name),
       ["app.getPath", "app.getVersion", "settings.snapshot"]
     );
     assert.deepEqual(
-      response.body.find((handler) => handler.name === "settings.snapshot"),
+      handlers.find((handler) => handler.name === "settings.snapshot"),
       {
         name: "settings.snapshot",
         description: "Return current settings.",
@@ -201,7 +208,7 @@ test("main bridge lists registered handler metadata", async () => {
         returns: "object"
       }
     );
-    const appGetPath = response.body.find((handler) => handler.name === "app.getPath");
+    const appGetPath = handlers.find((handler) => handler.name === "app.getPath");
     assert.equal(appGetPath.parameters[0].name, "name");
     assert.equal(appGetPath.parameters[0].type, "string");
     assert.ok(appGetPath.parameters[0].enum.includes("userData"));
@@ -247,23 +254,24 @@ test("main bridge enforces handler parameter metadata", async () => {
 
     const ok = await invoke("math.add", [2, 3]);
     assert.equal(ok.status, 200);
-    assert.equal(ok.body.result, 5);
+    assert.equal(ok.body.ok, true);
+    assert.equal(ok.body.data, 5);
 
     const badType = await invoke("math.add", ["2", 3]);
     assert.equal(badType.status, 400);
-    assert.match(badType.body.error, /args\[0\] \(left\) must be a finite number/);
+    assert.match(badType.body.error.message, /args\[0\] \(left\) must be a finite number/);
 
     const missing = await invoke("math.add", [2]);
     assert.equal(missing.status, 400);
-    assert.match(missing.body.error, /args\[1\] \(right\) is required/);
+    assert.match(missing.body.error.message, /args\[1\] \(right\) is required/);
 
     const extra = await invoke("math.add", [2, 3, 4]);
     assert.equal(extra.status, 400);
-    assert.match(extra.body.error, /at most 2 value/);
+    assert.match(extra.body.error.message, /at most 2 value/);
 
     const badEnum = await invoke("app.getPath", ["not-real"]);
     assert.equal(badEnum.status, 400);
-    assert.match(badEnum.body.error, /args\[0\] \(name\) must be one of/);
+    assert.match(badEnum.body.error.message, /args\[0\] \(name\) must be one of/);
   } finally {
     await closeServer(server);
     await cleanup();
@@ -523,8 +531,9 @@ function toRunnableMainBridgeModule(source) {
     .replace(/function findWindow\(windowId: unknown\): BrowserWindow/g, "function findWindow(windowId)")
     .replace(/function isAuthorized\(req: http\.IncomingMessage, token: string\): boolean/g, "function isAuthorized(req, token)")
     .replace(/function constantTimeEquals\(actual: string, expected: string\): boolean/g, "function constantTimeEquals(actual, expected)")
-    .replace(/constructor\(\s*readonly status: number,\s*message: string\s*\) \{/m, "constructor(status, message) {")
-    .replace(/super\(message\);/g, "super(message);\n    this.status = status;")
+    .replace(/constructor\(\s*readonly status: number,\s*message: string,\s*readonly code: string = bridgeErrorCodeForStatus\(status\)\s*\) \{/m, "constructor(status, message, code = bridgeErrorCodeForStatus(status)) {")
+    .replace(/super\(message\);/g, "super(message);\n    this.status = status;\n    this.code = code;")
+    .replace(/function bridgeErrorCodeForStatus\(status: number\): string/g, "function bridgeErrorCodeForStatus(status)")
     .replace(/function resolveMaxBodyBytes\(optionValue: number \| undefined\): number/g, "function resolveMaxBodyBytes(optionValue)")
     .replace(/function normalizeHandlerMetadata\(metadata: CodexBridgeHandlerMetadata\): CodexBridgeHandlerMetadata/g, "function normalizeHandlerMetadata(metadata)")
     .replace(/function normalizeOptionalMetadataString\(\s*value: unknown,\s*fieldName: string,\s*maxLength: number\s*\): string \| undefined/m, "function normalizeOptionalMetadataString(value, fieldName, maxLength)")
@@ -545,6 +554,9 @@ function toRunnableMainBridgeModule(source) {
     .replace(/function requireOptionalBoolean\(value: unknown, fieldName: string\): boolean \| undefined/g, "function requireOptionalBoolean(value, fieldName)")
     .replace(/function isJsonObject\(value: unknown\): value is Record<string, unknown>/g, "function isJsonObject(value)")
     .replace(/function isJsonPrimitive\(value: unknown\): value is string \| number \| boolean \| null/g, "function isJsonPrimitive(value)")
+    .replace(/function errorMessage\(error: unknown\): string/g, "function errorMessage(error)")
+    .replace(/function sendData\(res: http\.ServerResponse, status: number, data: unknown\): void/g, "function sendData(res, status, data)")
+    .replace(/function sendError\(res: http\.ServerResponse, status: number, code: string, message: string\): void/g, "function sendError(res, status, code, message)")
     .replace(/function formatJsonLiteral\(value: string \| number \| boolean \| null\): string/g, "function formatJsonLiteral(value)")
     .replace(/function sendJson\(res: http\.ServerResponse, status: number, payload: unknown\): void/g, "function sendJson(res, status, payload)");
 

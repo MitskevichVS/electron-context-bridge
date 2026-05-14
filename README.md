@@ -148,8 +148,10 @@ ENABLE_CODEX_BRIDGE=1 CODEX_BRIDGE_ALLOW_EVAL=1 CODEX_ELECTRON_BRIDGE_TOKEN=dev-
 ```
 
 Prefer allowlisted bridge handlers over renderer evaluation for app-specific actions.
+Bridge HTTP responses use a consistent envelope: `{ ok: true, data }` for
+successes and `{ ok: false, error: { code, message } }` for failures.
 Malformed JSON, wrong argument types, and oversized bodies return `400` or `413`
-from the Electron main-process bridge.
+with that error envelope.
 
 ## MCP Environment Variables
 
@@ -275,6 +277,7 @@ registerCodexBridgeHandler(
 Then list them from Codex with `electron_bridge_list_handlers`, or call them
 with `electron_bridge_invoke`. When `parameters` is present, `/invoke` rejects
 missing, extra, wrong-type, or out-of-enum arguments before calling the handler.
+Successful `/invoke` responses wrap the handler return value in `data`.
 
 ## BrowserWindow Access
 

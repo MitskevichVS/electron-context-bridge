@@ -244,8 +244,12 @@ function bridgeHeaders(extra = {}) {
   return headers;
 }
 
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function requireObject(value, fieldName) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isObject(value)) {
     throw new Error(`${fieldName} must be an object.`);
   }
   return value;
@@ -425,7 +429,7 @@ async function request(url, options = {}) {
     const body = contentType.includes("application/json") && text ? JSON.parse(text) : text;
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} from ${url}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+      throw new Error(`HTTP ${response.status} from ${url}: ${formatHttpErrorBody(body)}`);
     }
 
     return {
@@ -436,6 +440,17 @@ async function request(url, options = {}) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function formatHttpErrorBody(body) {
+  if (isObject(body) && body.ok === false && isObject(body.error)) {
+    const code = typeof body.error.code === "string" ? `${body.error.code}: ` : "";
+    const message = typeof body.error.message === "string"
+      ? body.error.message
+      : JSON.stringify(body.error);
+    return `${code}${message}`;
+  }
+  return typeof body === "string" ? body : JSON.stringify(body);
 }
 
 async function getCdpVersion(args) {
@@ -847,17 +862,17 @@ async function orchestratorInspect(args) {
   const bridgeHealth = await attempt(() =>
     bridgeRequest({ ...args, path: "/health", method: "GET" })
   );
-  report.bridge.health = unwrapAttempt(bridgeHealth, (value) => value.body);
+  report.bridge.health = unwrapAttempt(bridgeHealth, bridgeResponseData);
 
   const bridgeWindows = await attempt(() =>
     bridgeRequest({ ...args, path: "/windows", method: "GET" })
   );
-  report.bridge.windows = unwrapAttempt(bridgeWindows, (value) => value.body);
+  report.bridge.windows = unwrapAttempt(bridgeWindows, bridgeResponseData);
 
   const bridgeHandlers = await attempt(() =>
     bridgeRequest({ ...args, path: "/handlers", method: "GET" })
   );
-  report.bridge.handlers = unwrapAttempt(bridgeHandlers, (value) => value.body);
+  report.bridge.handlers = unwrapAttempt(bridgeHandlers, bridgeResponseData);
 
   const cdpVersion = await attempt(() => getCdpVersion(args));
   report.cdp.version = unwrapAttempt(cdpVersion);
@@ -867,7 +882,7 @@ async function orchestratorInspect(args) {
 
   const selectedTarget = await attempt(() => selectTarget(args, {
     targets: cdpTargets.ok ? cdpTargets.value : undefined,
-    windows: bridgeWindows.ok ? bridgeWindows.value.body : undefined
+    windows: bridgeWindows.ok ? bridgeResponseData(bridgeWindows.value) : undefined
   }));
   report.cdp.selectedTarget = unwrapAttempt(selectedTarget, (value) => summarizeTarget(value.target));
   report.cdp.targetSelection = unwrapAttempt(selectedTarget, (value) => value.selection);
@@ -960,6 +975,17 @@ function unwrapAttempt(attemptResult, mapValue = (value) => value) {
     ok: false,
     error: attemptResult.error
   };
+}
+
+function bridgeResponseData(response) {
+  return bridgeEnvelopeData(response.body);
+}
+
+function bridgeEnvelopeData(body) {
+  if (isObject(body) && body.ok === true && Object.prototype.hasOwnProperty.call(body, "data")) {
+    return body.data;
+  }
+  return body;
 }
 
 function unwrapRuntimeEvaluation(value) {

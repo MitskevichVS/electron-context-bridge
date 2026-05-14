@@ -70,8 +70,10 @@ The MCP server reads:
 - `CODEX_ELECTRON_BRIDGE_TOKEN`, bearer/header token for authenticated bridge requests
 
 Keep the bridge local-only and development-only.
-Malformed JSON, wrong argument types, and oversized bodies return `400` or
-`413` from the Electron main-process bridge.
+Bridge HTTP responses use `{ ok: true, data }` for successes and
+`{ ok: false, error: { code, message } }` for failures. Malformed JSON, wrong
+argument types, and oversized bodies return `400` or `413` with that error
+envelope.
 
 Run regression tests with:
 
