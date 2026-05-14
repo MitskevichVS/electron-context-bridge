@@ -25,6 +25,10 @@ plugins/
     .mcp.json
     README.md
     scripts/
+      bridge/
+        envelope.ts
+        registry.ts
+        validation.ts
       electron-codex-bridge.mjs
       electron-main-bridge-example.ts
     skills/
@@ -45,6 +49,7 @@ Important files:
 - `plugins/electron-codex-bridge/.mcp.json` tells Codex how to launch the MCP server.
 - `plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs` is the MCP server.
 - `plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts` is the optional Electron main-process bridge example.
+- `plugins/electron-codex-bridge/scripts/bridge/` contains the shared bridge envelope, validation, and handler registry helpers.
 - `plugins/electron-codex-bridge/skills/electron-best-practices/SKILL.md` adds secure Electron + React development guidance and companion references/scripts.
 
 ## How Codex Finds The Plugin
@@ -364,6 +369,9 @@ Check the MCP server syntax:
 
 ```bash
 node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs
+node --check plugins/electron-codex-bridge/scripts/bridge/envelope.ts
+node --check plugins/electron-codex-bridge/scripts/bridge/validation.ts
+node --check plugins/electron-codex-bridge/scripts/bridge/registry.ts
 node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts
 ```
 

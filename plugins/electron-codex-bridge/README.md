@@ -8,6 +8,7 @@ It contributes:
 - a Codex skill at `skills/electron-codex-bridge/SKILL.md`
 - an Electron best-practices skill at `skills/electron-best-practices/SKILL.md`
 - an Electron main-process bridge example at `scripts/electron-main-bridge-example.ts`
+- shared bridge helpers under `scripts/bridge/` for response envelopes, validation, and handler metadata
 
 ## MCP Tools
 
@@ -83,7 +84,8 @@ npm test
 ```
 
 The tests import `scripts/electron-main-bridge-example.ts` directly through
-Node's native TypeScript stripping. Use Node 24 or newer for local checks.
+Node's native TypeScript stripping, including its `scripts/bridge/*.ts` helper
+modules. Use Node 24 or newer for local checks.
 
 ## Skills
 

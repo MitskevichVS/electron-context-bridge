@@ -63,8 +63,9 @@ JSON request bodies are limited to 1 MiB by default. Override with
 `maxBodyBytes` or `CODEX_ELECTRON_BRIDGE_MAX_BODY_BYTES`.
 Bridge HTTP responses use `{ ok: true, data }` for successes and
 `{ ok: false, error: { code, message } }` for failures.
-Tests import the bridge sample as real TypeScript through Node's native type
-stripping, so local checks require Node 24 or newer.
+Tests import the bridge sample and its `scripts/bridge/*.ts` helpers as real
+TypeScript through Node's native type stripping, so local checks require Node 24
+or newer.
 
 Start the app with:
 

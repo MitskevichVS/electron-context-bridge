@@ -5,8 +5,8 @@
   "description": "Codex plugin for inspecting and driving local Electron apps during development.",
   "type": "module",
   "scripts": {
-    "check": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts && node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs",
-    "check:syntax": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts",
+    "check": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --check plugins/electron-codex-bridge/scripts/bridge/envelope.ts && node --check plugins/electron-codex-bridge/scripts/bridge/validation.ts && node --check plugins/electron-codex-bridge/scripts/bridge/registry.ts && node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts && node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs",
+    "check:syntax": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --check plugins/electron-codex-bridge/scripts/bridge/envelope.ts && node --check plugins/electron-codex-bridge/scripts/bridge/validation.ts && node --check plugins/electron-codex-bridge/scripts/bridge/registry.ts && node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts",
     "test": "node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs"
   },
   "engines": {
