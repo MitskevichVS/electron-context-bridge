@@ -21,7 +21,7 @@ Apply the companion guidance to bridge setup, renderer inspection, IPC handler d
 1. Start with `electron_orchestrator_inspect` for the standard app snapshot. It combines bridge health, BrowserWindow list, allowlisted handler list, CDP version, CDP targets, renderer probe, and optional screenshot.
 2. Use specific tools only when the orchestrator shows a narrower next step.
 3. Use CDP tools for visual/browser-window work: screenshot, click, type, and renderer evaluation.
-4. Use `electron_bridge_list_handlers` before `electron_bridge_invoke` when handler names or argument expectations are unclear.
+4. Use `electron_bridge_list_handlers` before `electron_bridge_invoke` when handler names or argument expectations are unclear. Prefer handlers with declared `parameters` because the bridge validates missing, extra, wrong-type, and out-of-enum arguments before invocation.
 5. Treat `electron_cdp_evaluate` and `/renderer/execute-js` as development-only tools. Prefer app-defined bridge handlers when changing app state.
 
 ## Orchestrator

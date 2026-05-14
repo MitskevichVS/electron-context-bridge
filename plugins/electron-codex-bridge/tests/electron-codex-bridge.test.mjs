@@ -108,6 +108,14 @@ test("main bridge validates JSON bodies and invoke args", async () => {
     assert.equal(badArgs.status, 400);
     assert.match(badArgs.body.error, /args must be an array/);
 
+    const extraArgs = await bridgeFetch(server, "/invoke", {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ name: "app.getVersion", args: ["extra"] })
+    });
+    assert.equal(extraArgs.status, 400);
+    assert.match(extraArgs.body.error, /at most 0 value/);
+
     const badWindowId = await bridgeFetch(server, "/window/focus", {
       method: "POST",
       headers: { ...auth, "content-type": "application/json" },
@@ -193,6 +201,69 @@ test("main bridge lists registered handler metadata", async () => {
         returns: "object"
       }
     );
+    const appGetPath = response.body.find((handler) => handler.name === "app.getPath");
+    assert.equal(appGetPath.parameters[0].name, "name");
+    assert.equal(appGetPath.parameters[0].type, "string");
+    assert.ok(appGetPath.parameters[0].enum.includes("userData"));
+  } finally {
+    await closeServer(server);
+    await cleanup();
+  }
+});
+
+test("main bridge enforces handler parameter metadata", async () => {
+  const { module, cleanup } = await loadMainBridgeExample();
+  let server;
+
+  try {
+    module.registerCodexBridgeHandler(
+      "math.add",
+      (left, right) => Number(left) + Number(right),
+      {
+        description: "Add two numbers.",
+        args: ["left: first addend", "right: second addend"],
+        parameters: [
+          { name: "left", type: "number", description: "First addend." },
+          { name: "right", type: "number", description: "Second addend." }
+        ],
+        returns: "number"
+      }
+    );
+
+    await withEnv({ ENABLE_CODEX_BRIDGE: "1" }, async () => {
+      server = module.startCodexBridge({
+        token: "test-secret",
+        port: 0
+      });
+      await once(server, "listening");
+    });
+
+    const auth = { "x-codex-bridge-token": "test-secret" };
+    const invoke = (name, args) => bridgeFetch(server, "/invoke", {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ name, args })
+    });
+
+    const ok = await invoke("math.add", [2, 3]);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.result, 5);
+
+    const badType = await invoke("math.add", ["2", 3]);
+    assert.equal(badType.status, 400);
+    assert.match(badType.body.error, /args\[0\] \(left\) must be a finite number/);
+
+    const missing = await invoke("math.add", [2]);
+    assert.equal(missing.status, 400);
+    assert.match(missing.body.error, /args\[1\] \(right\) is required/);
+
+    const extra = await invoke("math.add", [2, 3, 4]);
+    assert.equal(extra.status, 400);
+    assert.match(extra.body.error, /at most 2 value/);
+
+    const badEnum = await invoke("app.getPath", ["not-real"]);
+    assert.equal(badEnum.status, 400);
+    assert.match(badEnum.body.error, /args\[0\] \(name\) must be one of/);
   } finally {
     await closeServer(server);
     await cleanup();
@@ -218,6 +289,18 @@ test("main bridge validates handler registry metadata", async () => {
     assert.throws(
       () => module.registerCodexBridgeHandler("bad.returns", () => null, { returns: 42 }),
       /metadata returns/
+    );
+    assert.throws(
+      () => module.registerCodexBridgeHandler("bad.parameters", () => null, { parameters: "nope" }),
+      /metadata parameters/
+    );
+    assert.throws(
+      () => module.registerCodexBridgeHandler("bad.parameter.name", () => null, { parameters: [{ type: "string" }] }),
+      /parameters\[0\]\.name/
+    );
+    assert.throws(
+      () => module.registerCodexBridgeHandler("bad.parameter.enum", () => null, { parameters: [{ name: "kind", enum: [{}] }] }),
+      /parameters\[0\]\.enum\[0\]/
     );
   } finally {
     await cleanup();
@@ -423,6 +506,8 @@ function toRunnableMainBridgeModule(source) {
       ].join("\n")
     )
     .replace(/^type BridgeHandler = .*\n\n/m, "")
+    .replace(/export type CodexBridgeHandlerParameterType =[\s\S]*?;\n\n/, "")
+    .replace(/export type CodexBridgeHandlerParameterMetadata = \{[\s\S]*?\};\n\n/, "")
     .replace(/export type CodexBridgeHandlerMetadata = \{[\s\S]*?\};\n\n/, "")
     .replace(/type BridgeHandlerRecord = \{[\s\S]*?\};\n\n/, "")
     .replace(/export type CodexBridgeOptions = \{[\s\S]*?\};\n\n/, "")
@@ -431,6 +516,10 @@ function toRunnableMainBridgeModule(source) {
     .replace(/export function startCodexBridge\(options: CodexBridgeOptions = \{\}\): http\.Server \| undefined/g, "function startCodexBridge(options = {})")
     .replace(/app\.getPath\(String\(name\) as Parameters<typeof app\.getPath>\[0\]\)/g, "app.getPath(String(name))")
     .replace(/function describeWindow\(win: BrowserWindow\)/g, "function describeWindow(win)")
+    .replace(/function validateHandlerArgs\(\s*parameters: CodexBridgeHandlerParameterMetadata\[\] \| undefined,\s*args: unknown\[\]\s*\): void/m, "function validateHandlerArgs(parameters, args)")
+    .replace(/function validateHandlerArg\(\s*parameter: CodexBridgeHandlerParameterMetadata,\s*value: unknown,\s*index: number\s*\): void/m, "function validateHandlerArg(parameter, value, index)")
+    .replace(/function matchesParameterType\(type: CodexBridgeHandlerParameterType, value: unknown\): boolean/g, "function matchesParameterType(type, value)")
+    .replace(/function expectedTypeLabel\(type: CodexBridgeHandlerParameterType\): string/g, "function expectedTypeLabel(type)")
     .replace(/function findWindow\(windowId: unknown\): BrowserWindow/g, "function findWindow(windowId)")
     .replace(/function isAuthorized\(req: http\.IncomingMessage, token: string\): boolean/g, "function isAuthorized(req, token)")
     .replace(/function constantTimeEquals\(actual: string, expected: string\): boolean/g, "function constantTimeEquals(actual, expected)")
@@ -440,6 +529,13 @@ function toRunnableMainBridgeModule(source) {
     .replace(/function normalizeHandlerMetadata\(metadata: CodexBridgeHandlerMetadata\): CodexBridgeHandlerMetadata/g, "function normalizeHandlerMetadata(metadata)")
     .replace(/function normalizeOptionalMetadataString\(\s*value: unknown,\s*fieldName: string,\s*maxLength: number\s*\): string \| undefined/m, "function normalizeOptionalMetadataString(value, fieldName, maxLength)")
     .replace(/function normalizeHandlerArgDescriptions\(value: unknown\): string\[\] \| undefined/g, "function normalizeHandlerArgDescriptions(value)")
+    .replace(/function normalizeHandlerParameters\(value: unknown\): CodexBridgeHandlerParameterMetadata\[\] \| undefined/g, "function normalizeHandlerParameters(value)")
+    .replace(/function normalizeHandlerParameter\(value: unknown, index: number\): CodexBridgeHandlerParameterMetadata/g, "function normalizeHandlerParameter(value, index)")
+    .replace(/function normalizeHandlerParameterType\(\s*value: unknown,\s*index: number\s*\): CodexBridgeHandlerParameterType/m, "function normalizeHandlerParameterType(value, index)")
+    .replace(/return value as CodexBridgeHandlerParameterType;/g, "return value;")
+    .replace(/function normalizeRequiredMetadataString\(\s*value: unknown,\s*fieldName: string,\s*maxLength: number\s*\): string/m, "function normalizeRequiredMetadataString(value, fieldName, maxLength)")
+    .replace(/function normalizeOptionalMetadataBoolean\(\s*value: unknown,\s*fieldName: string,\s*defaultValue: boolean\s*\): boolean/m, "function normalizeOptionalMetadataBoolean(value, fieldName, defaultValue)")
+    .replace(/function normalizeHandlerEnumValues\(\s*value: unknown,\s*fieldName: string\s*\): Array<string \| number \| boolean \| null> \| undefined/m, "function normalizeHandlerEnumValues(value, fieldName)")
     .replace(/async function readJsonBody\(\s*req: http\.IncomingMessage,\s*maxBodyBytes: number\s*\): Promise<Record<string, unknown>>/m, "async function readJsonBody(req, maxBodyBytes)")
     .replace(/const chunks: Buffer\[\] = \[\];/g, "const chunks = [];")
     .replace(/let parsed: unknown;/g, "let parsed;")
@@ -448,6 +544,8 @@ function toRunnableMainBridgeModule(source) {
     .replace(/function requirePositiveInteger\(value: unknown, fieldName: string\): number/g, "function requirePositiveInteger(value, fieldName)")
     .replace(/function requireOptionalBoolean\(value: unknown, fieldName: string\): boolean \| undefined/g, "function requireOptionalBoolean(value, fieldName)")
     .replace(/function isJsonObject\(value: unknown\): value is Record<string, unknown>/g, "function isJsonObject(value)")
+    .replace(/function isJsonPrimitive\(value: unknown\): value is string \| number \| boolean \| null/g, "function isJsonPrimitive(value)")
+    .replace(/function formatJsonLiteral\(value: string \| number \| boolean \| null\): string/g, "function formatJsonLiteral(value)")
     .replace(/function sendJson\(res: http\.ServerResponse, status: number, payload: unknown\): void/g, "function sendJson(res, status, payload)");
 
   transformed += "\nexport { registerCodexBridgeHandler, startCodexBridge };\n";

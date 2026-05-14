@@ -222,12 +222,20 @@ The example bridge includes a small handler registry:
 registerCodexBridgeHandler("app.getVersion", () => app.getVersion(), {
   description: "Return the Electron app version.",
   args: [],
+  parameters: [],
   returns: "string"
 });
 
 registerCodexBridgeHandler("app.getPath", (name) => app.getPath(String(name) as any), {
   description: "Return a path from Electron app.getPath.",
   args: ["name: Electron app path name"],
+  parameters: [
+    {
+      name: "name",
+      type: "string",
+      description: "Electron app path name."
+    }
+  ],
   returns: "string"
 });
 ```
@@ -241,6 +249,7 @@ registerCodexBridgeHandler(
   {
     description: "Return the current settings snapshot.",
     args: [],
+    parameters: [],
     returns: "SettingsSnapshot"
   }
 );
@@ -251,13 +260,21 @@ registerCodexBridgeHandler(
   {
     description: "Open a workspace file in the app.",
     args: ["filePath: absolute path to open"],
+    parameters: [
+      {
+        name: "filePath",
+        type: "string",
+        description: "Absolute path to open."
+      }
+    ],
     returns: "{ ok: boolean }"
   }
 );
 ```
 
 Then list them from Codex with `electron_bridge_list_handlers`, or call them
-with `electron_bridge_invoke`.
+with `electron_bridge_invoke`. When `parameters` is present, `/invoke` rejects
+missing, extra, wrong-type, or out-of-enum arguments before calling the handler.
 
 ## BrowserWindow Access
 
