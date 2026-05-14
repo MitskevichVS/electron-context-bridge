@@ -20,10 +20,11 @@ It contributes:
 - `electron_cdp_type`
 - `electron_bridge_health`
 - `electron_bridge_list_windows`
+- `electron_bridge_list_handlers`
 - `electron_bridge_invoke`
 - `electron_bridge_request`
 
-Start with `electron_orchestrator_inspect`. It runs the common inspection flow in one call: bridge health, window list, CDP version, CDP targets, renderer probe, and optional screenshot.
+Start with `electron_orchestrator_inspect`. It runs the common inspection flow in one call: bridge health, window list, handler list, CDP version, CDP targets, renderer probe, and optional screenshot.
 When the main-process bridge window list is available, the orchestrator prefers
 the focused BrowserWindow's matching CDP target by URL or title. Explicit
 `targetId` still wins, and `cdp.targetSelection` explains the final choice.

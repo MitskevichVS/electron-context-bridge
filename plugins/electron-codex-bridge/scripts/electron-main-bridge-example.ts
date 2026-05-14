@@ -5,6 +5,17 @@ import { app, BrowserWindow } from "electron";
 
 type BridgeHandler = (...args: unknown[]) => unknown | Promise<unknown>;
 
+export type CodexBridgeHandlerMetadata = {
+  description?: string;
+  args?: string[];
+  returns?: string;
+};
+
+type BridgeHandlerRecord = {
+  handler: BridgeHandler;
+  metadata: CodexBridgeHandlerMetadata;
+};
+
 export type CodexBridgeOptions = {
   host?: string;
   port?: number;
@@ -14,19 +25,29 @@ export type CodexBridgeOptions = {
   maxBodyBytes?: number;
 };
 
-const handlers = new Map<string, BridgeHandler>();
+const handlers = new Map<string, BridgeHandlerRecord>();
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const MAX_HANDLER_NAME_LENGTH = 120;
 const MAX_CHANNEL_NAME_LENGTH = 160;
+const MAX_HANDLER_DESCRIPTION_LENGTH = 500;
+const MAX_HANDLER_ARG_DESCRIPTION_LENGTH = 160;
+const MAX_HANDLER_RETURNS_LENGTH = 160;
 
-export function registerCodexBridgeHandler(name: string, handler: BridgeHandler): void {
-  if (name.trim() === "" || name.length > MAX_HANDLER_NAME_LENGTH) {
+export function registerCodexBridgeHandler(
+  name: string,
+  handler: BridgeHandler,
+  metadata: CodexBridgeHandlerMetadata = {}
+): void {
+  if (typeof name !== "string" || name.trim() === "" || name.length > MAX_HANDLER_NAME_LENGTH) {
     throw new Error(`Codex bridge handler name must be 1-${MAX_HANDLER_NAME_LENGTH} characters.`);
   }
   if (typeof handler !== "function") {
     throw new Error("Codex bridge handler must be a function.");
   }
-  handlers.set(name, handler);
+  handlers.set(name, {
+    handler,
+    metadata: normalizeHandlerMetadata(metadata)
+  });
 }
 
 export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server | undefined {
@@ -49,8 +70,16 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
     );
   }
 
-  registerCodexBridgeHandler("app.getVersion", () => app.getVersion());
-  registerCodexBridgeHandler("app.getPath", (name) => app.getPath(String(name) as Parameters<typeof app.getPath>[0]));
+  registerCodexBridgeHandler("app.getVersion", () => app.getVersion(), {
+    description: "Return the Electron app version.",
+    args: [],
+    returns: "string"
+  });
+  registerCodexBridgeHandler("app.getPath", (name) => app.getPath(String(name) as Parameters<typeof app.getPath>[0]), {
+    description: "Return a path from Electron app.getPath.",
+    args: ["name: Electron app path name"],
+    returns: "string"
+  });
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -75,11 +104,16 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
         return;
       }
 
+      if (req.method === "GET" && url.pathname === "/handlers") {
+        sendJson(res, 200, describeHandlers());
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/invoke") {
         const body = await readJsonBody(req, maxBodyBytes);
         const name = requireNonEmptyString(body.name, "name", MAX_HANDLER_NAME_LENGTH);
-        const handler = handlers.get(name);
-        if (!handler) {
+        const record = handlers.get(name);
+        if (!record) {
           sendJson(res, 404, { error: `No Codex bridge handler is registered for '${name}'.` });
           return;
         }
@@ -88,7 +122,7 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
           Object.prototype.hasOwnProperty.call(body, "args") ? body.args : [],
           "args"
         );
-        sendJson(res, 200, { result: await handler(...args) });
+        sendJson(res, 200, { result: await record.handler(...args) });
         return;
       }
 
@@ -163,6 +197,15 @@ function describeWindow(win: BrowserWindow) {
   };
 }
 
+function describeHandlers() {
+  return [...handlers.entries()]
+    .map(([name, record]) => ({
+      name,
+      ...record.metadata
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
 function findWindow(windowId: unknown): BrowserWindow {
   const id = requirePositiveInteger(windowId, "windowId");
   const win = BrowserWindow.fromId(id);
@@ -205,6 +248,58 @@ function resolveMaxBodyBytes(optionValue: number | undefined): number {
     throw new Error("Codex bridge maxBodyBytes must be a positive safe integer.");
   }
   return value;
+}
+
+function normalizeHandlerMetadata(metadata: CodexBridgeHandlerMetadata): CodexBridgeHandlerMetadata {
+  if (!isJsonObject(metadata)) {
+    throw new Error("Codex bridge handler metadata must be an object.");
+  }
+
+  return {
+    description: normalizeOptionalMetadataString(
+      metadata.description,
+      "description",
+      MAX_HANDLER_DESCRIPTION_LENGTH
+    ),
+    args: normalizeHandlerArgDescriptions(metadata.args),
+    returns: normalizeOptionalMetadataString(
+      metadata.returns,
+      "returns",
+      MAX_HANDLER_RETURNS_LENGTH
+    )
+  };
+}
+
+function normalizeOptionalMetadataString(
+  value: unknown,
+  fieldName: string,
+  maxLength: number
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`Codex bridge handler metadata ${fieldName} must be a non-empty string.`);
+  }
+  if (value.length > maxLength) {
+    throw new Error(`Codex bridge handler metadata ${fieldName} must be at most ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function normalizeHandlerArgDescriptions(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error("Codex bridge handler metadata args must be an array.");
+  }
+
+  return value.map((item, index) => {
+    if (typeof item !== "string" || item.trim() === "") {
+      throw new Error(`Codex bridge handler metadata args[${index}] must be a non-empty string.`);
+    }
+    if (item.length > MAX_HANDLER_ARG_DESCRIPTION_LENGTH) {
+      throw new Error(`Codex bridge handler metadata args[${index}] must be at most ${MAX_HANDLER_ARG_DESCRIPTION_LENGTH} characters.`);
+    }
+    return item;
+  });
 }
 
 async function readJsonBody(

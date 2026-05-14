@@ -19,7 +19,7 @@ const MAX_TYPED_TEXT_LENGTH = 64 * 1024;
 const tools = [
   {
     name: "electron_orchestrator_inspect",
-    description: "Run the standard Electron inspection flow in one tool call: bridge health, windows, CDP version, CDP targets, renderer probe, and optional screenshot.",
+    description: "Run the standard Electron inspection flow in one tool call: bridge health, windows, handler list, CDP version, CDP targets, renderer probe, and optional screenshot.",
     inputSchema: {
       type: "object",
       properties: {
@@ -175,6 +175,16 @@ const tools = [
   {
     name: "electron_bridge_list_windows",
     description: "List BrowserWindow instances through the explicit Electron main-process bridge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bridgeUrl: { type: "string", format: "uri" }
+      }
+    }
+  },
+  {
+    name: "electron_bridge_list_handlers",
+    description: "List allowlisted handlers registered in the Electron main-process bridge.",
     inputSchema: {
       type: "object",
       properties: {
@@ -844,6 +854,11 @@ async function orchestratorInspect(args) {
   );
   report.bridge.windows = unwrapAttempt(bridgeWindows, (value) => value.body);
 
+  const bridgeHandlers = await attempt(() =>
+    bridgeRequest({ ...args, path: "/handlers", method: "GET" })
+  );
+  report.bridge.handlers = unwrapAttempt(bridgeHandlers, (value) => value.body);
+
   const cdpVersion = await attempt(() => getCdpVersion(args));
   report.cdp.version = unwrapAttempt(cdpVersion);
 
@@ -1053,6 +1068,8 @@ async function callTool(name, args) {
       return textResult(await bridgeRequest({ ...args, path: "/health", method: "GET" }));
     case "electron_bridge_list_windows":
       return textResult(await bridgeRequest({ ...args, path: "/windows", method: "GET" }));
+    case "electron_bridge_list_handlers":
+      return textResult(await bridgeRequest({ ...args, path: "/handlers", method: "GET" }));
     case "electron_bridge_invoke": {
       const handlerName = requireString(args.name, "name", MAX_HANDLER_NAME_LENGTH);
       const handlerArgs = Object.prototype.hasOwnProperty.call(args, "args")

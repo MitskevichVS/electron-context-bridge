@@ -76,6 +76,7 @@ The plugin exposes these MCP tools:
 - `electron_cdp_type`
 - `electron_bridge_health`
 - `electron_bridge_list_windows`
+- `electron_bridge_list_handlers`
 - `electron_bridge_invoke`
 - `electron_bridge_request`
 
@@ -83,7 +84,7 @@ The CDP tools talk to Electron's Chromium debugging port.
 
 The bridge tools talk to a small HTTP server that you explicitly start inside your Electron main process.
 
-Start with `electron_orchestrator_inspect` for the usual workflow. It checks the main-process bridge, lists BrowserWindows, lists CDP targets, probes the selected renderer, and can attach a screenshot in one response.
+Start with `electron_orchestrator_inspect` for the usual workflow. It checks the main-process bridge, lists BrowserWindows, lists allowlisted bridge handlers, lists CDP targets, probes the selected renderer, and can attach a screenshot in one response.
 
 The plugin also contributes two Codex skills:
 
@@ -190,6 +191,10 @@ Use electron-codex-bridge to list Electron windows.
 ```
 
 ```text
+Use electron-codex-bridge to list Electron bridge handlers.
+```
+
+```text
 Use electron-codex-bridge to evaluate document.title in the renderer.
 ```
 
@@ -214,23 +219,45 @@ reason and ambiguity notes.
 The example bridge includes a small handler registry:
 
 ```ts
-registerCodexBridgeHandler("app.getVersion", () => app.getVersion());
-registerCodexBridgeHandler("app.getPath", (name) => app.getPath(String(name) as any));
+registerCodexBridgeHandler("app.getVersion", () => app.getVersion(), {
+  description: "Return the Electron app version.",
+  args: [],
+  returns: "string"
+});
+
+registerCodexBridgeHandler("app.getPath", (name) => app.getPath(String(name) as any), {
+  description: "Return a path from Electron app.getPath.",
+  args: ["name: Electron app path name"],
+  returns: "string"
+});
 ```
 
 Add app-specific handlers for useful, safe operations:
 
 ```ts
-registerCodexBridgeHandler("settings.snapshot", () => {
-  return readCurrentSettings();
-});
+registerCodexBridgeHandler(
+  "settings.snapshot",
+  () => readCurrentSettings(),
+  {
+    description: "Return the current settings snapshot.",
+    args: [],
+    returns: "SettingsSnapshot"
+  }
+);
 
-registerCodexBridgeHandler("workspace.openFile", async (filePath) => {
-  return openFileInApp(String(filePath));
-});
+registerCodexBridgeHandler(
+  "workspace.openFile",
+  async (filePath) => openFileInApp(String(filePath)),
+  {
+    description: "Open a workspace file in the app.",
+    args: ["filePath: absolute path to open"],
+    returns: "{ ok: boolean }"
+  }
+);
 ```
 
-Then call them from Codex with `electron_bridge_invoke`.
+Then list them from Codex with `electron_bridge_list_handlers`, or call them
+with `electron_bridge_invoke`.
 
 ## BrowserWindow Access
 

@@ -152,6 +152,78 @@ test("main bridge rejects oversized request bodies", async () => {
   }
 });
 
+test("main bridge lists registered handler metadata", async () => {
+  const { module, cleanup } = await loadMainBridgeExample();
+  let server;
+
+  try {
+    module.registerCodexBridgeHandler(
+      "settings.snapshot",
+      () => ({ theme: "dark" }),
+      {
+        description: "Return current settings.",
+        args: [],
+        returns: "object"
+      }
+    );
+
+    await withEnv({ ENABLE_CODEX_BRIDGE: "1" }, async () => {
+      server = module.startCodexBridge({
+        token: "test-secret",
+        port: 0
+      });
+      await once(server, "listening");
+    });
+
+    const response = await bridgeFetch(server, "/handlers", {
+      headers: { "x-codex-bridge-token": "test-secret" }
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      response.body.map((handler) => handler.name),
+      ["app.getPath", "app.getVersion", "settings.snapshot"]
+    );
+    assert.deepEqual(
+      response.body.find((handler) => handler.name === "settings.snapshot"),
+      {
+        name: "settings.snapshot",
+        description: "Return current settings.",
+        args: [],
+        returns: "object"
+      }
+    );
+  } finally {
+    await closeServer(server);
+    await cleanup();
+  }
+});
+
+test("main bridge validates handler registry metadata", async () => {
+  const { module, cleanup } = await loadMainBridgeExample();
+
+  try {
+    assert.throws(
+      () => module.registerCodexBridgeHandler(null, () => null),
+      /handler name/
+    );
+    assert.throws(
+      () => module.registerCodexBridgeHandler("bad.description", () => null, { description: "" }),
+      /metadata description/
+    );
+    assert.throws(
+      () => module.registerCodexBridgeHandler("bad.args", () => null, { args: ["ok", ""] }),
+      /metadata args\[1\]/
+    );
+    assert.throws(
+      () => module.registerCodexBridgeHandler("bad.returns", () => null, { returns: 42 }),
+      /metadata returns/
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
 test("MCP server rejects malformed bridge and CDP tool calls cleanly", async () => {
   const invokeResult = await callMcpTool("electron_bridge_invoke", {
     name: "",
@@ -203,6 +275,11 @@ test("MCP server reports tools and can run text-only orchestrator smoke", async 
   assert.ok(
     responses.get(2).result.tools.some(
       (tool) => tool.name === "electron_orchestrator_inspect"
+    )
+  );
+  assert.ok(
+    responses.get(2).result.tools.some(
+      (tool) => tool.name === "electron_bridge_list_handlers"
     )
   );
 
@@ -346,9 +423,11 @@ function toRunnableMainBridgeModule(source) {
       ].join("\n")
     )
     .replace(/^type BridgeHandler = .*\n\n/m, "")
+    .replace(/export type CodexBridgeHandlerMetadata = \{[\s\S]*?\};\n\n/, "")
+    .replace(/type BridgeHandlerRecord = \{[\s\S]*?\};\n\n/, "")
     .replace(/export type CodexBridgeOptions = \{[\s\S]*?\};\n\n/, "")
-    .replace(/new Map<string, BridgeHandler>\(\)/g, "new Map()")
-    .replace(/export function registerCodexBridgeHandler\(name: string, handler: BridgeHandler\): void/g, "function registerCodexBridgeHandler(name, handler)")
+    .replace(/new Map<string, BridgeHandlerRecord>\(\)/g, "new Map()")
+    .replace(/export function registerCodexBridgeHandler\(\s*name: string,\s*handler: BridgeHandler,\s*metadata: CodexBridgeHandlerMetadata = \{\}\s*\): void/m, "function registerCodexBridgeHandler(name, handler, metadata = {})")
     .replace(/export function startCodexBridge\(options: CodexBridgeOptions = \{\}\): http\.Server \| undefined/g, "function startCodexBridge(options = {})")
     .replace(/app\.getPath\(String\(name\) as Parameters<typeof app\.getPath>\[0\]\)/g, "app.getPath(String(name))")
     .replace(/function describeWindow\(win: BrowserWindow\)/g, "function describeWindow(win)")
@@ -358,6 +437,9 @@ function toRunnableMainBridgeModule(source) {
     .replace(/constructor\(\s*readonly status: number,\s*message: string\s*\) \{/m, "constructor(status, message) {")
     .replace(/super\(message\);/g, "super(message);\n    this.status = status;")
     .replace(/function resolveMaxBodyBytes\(optionValue: number \| undefined\): number/g, "function resolveMaxBodyBytes(optionValue)")
+    .replace(/function normalizeHandlerMetadata\(metadata: CodexBridgeHandlerMetadata\): CodexBridgeHandlerMetadata/g, "function normalizeHandlerMetadata(metadata)")
+    .replace(/function normalizeOptionalMetadataString\(\s*value: unknown,\s*fieldName: string,\s*maxLength: number\s*\): string \| undefined/m, "function normalizeOptionalMetadataString(value, fieldName, maxLength)")
+    .replace(/function normalizeHandlerArgDescriptions\(value: unknown\): string\[\] \| undefined/g, "function normalizeHandlerArgDescriptions(value)")
     .replace(/async function readJsonBody\(\s*req: http\.IncomingMessage,\s*maxBodyBytes: number\s*\): Promise<Record<string, unknown>>/m, "async function readJsonBody(req, maxBodyBytes)")
     .replace(/const chunks: Buffer\[\] = \[\];/g, "const chunks = [];")
     .replace(/let parsed: unknown;/g, "let parsed;")
