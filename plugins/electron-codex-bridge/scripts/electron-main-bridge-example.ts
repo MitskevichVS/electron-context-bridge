@@ -33,7 +33,7 @@ export function startCodexBridge(options: CodexBridgeOptions = {}): http.Server 
   if (process.env.ENABLE_CODEX_BRIDGE !== "1") return undefined;
 
   const host = options.host || "127.0.0.1";
-  const port = options.port || Number(process.env.CODEX_ELECTRON_BRIDGE_PORT || 17345);
+  const port = options.port ?? Number(process.env.CODEX_ELECTRON_BRIDGE_PORT || 17345);
   const token = options.token || process.env.CODEX_ELECTRON_BRIDGE_TOKEN || "";
   const allowUnauthenticated =
     options.allowUnauthenticated === true ||

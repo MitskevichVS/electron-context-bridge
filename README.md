@@ -295,6 +295,12 @@ If Codex does not show the plugin:
 
 ## Development Checks
 
+On machines with `npm`, run the standard checks:
+
+```bash
+npm run check
+```
+
 Validate plugin JSON:
 
 ```bash
@@ -306,6 +312,13 @@ Check the MCP server syntax:
 
 ```bash
 node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs
+```
+
+Run the bridge regression tests:
+
+```bash
+npm test
+# or: node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs
 ```
 
 Smoke-test MCP initialization:

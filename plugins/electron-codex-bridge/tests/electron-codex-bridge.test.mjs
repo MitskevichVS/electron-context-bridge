@@ -1,0 +1,507 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { EventEmitter } from "node:events";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Readable } from "node:stream";
+import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_DIR = path.resolve(__dirname, "..");
+const MCP_SERVER_PATH = path.join(PLUGIN_DIR, "scripts", "electron-codex-bridge.mjs");
+const MAIN_BRIDGE_EXAMPLE_PATH = path.join(
+  PLUGIN_DIR,
+  "scripts",
+  "electron-main-bridge-example.ts"
+);
+
+test("main bridge refuses to start without token unless unauthenticated mode is explicit", async () => {
+  const { module, cleanup } = await loadMainBridgeExample();
+  try {
+    withEnv({ ENABLE_CODEX_BRIDGE: "1" }, () => {
+      assert.throws(
+        () => module.startCodexBridge({ port: 0 }),
+        /auth token is required/
+      );
+    });
+
+    let server;
+    await withEnv({ ENABLE_CODEX_BRIDGE: "1" }, async () => {
+      server = module.startCodexBridge({
+        allowUnauthenticated: true,
+        port: 0
+      });
+      await once(server, "listening");
+    });
+
+    try {
+      const response = await bridgeFetch(server, "/health");
+      assert.equal(response.status, 200);
+      assert.equal(response.body.auth.required, false);
+    } finally {
+      await closeServer(server);
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
+test("main bridge enforces token auth and allows matching token", async () => {
+  const { module, cleanup } = await loadMainBridgeExample();
+  let server;
+
+  try {
+    await withEnv({ ENABLE_CODEX_BRIDGE: "1" }, async () => {
+      server = module.startCodexBridge({
+        token: "test-secret",
+        port: 0
+      });
+      await once(server, "listening");
+    });
+
+    const unauthorized = await bridgeFetch(server, "/health");
+    assert.equal(unauthorized.status, 401);
+    assert.equal(unauthorized.body.error, "Unauthorized");
+
+    const authorized = await bridgeFetch(server, "/health", {
+      headers: { "x-codex-bridge-token": "test-secret" }
+    });
+    assert.equal(authorized.status, 200);
+    assert.equal(authorized.body.ok, true);
+    assert.equal(authorized.body.auth.required, true);
+  } finally {
+    await closeServer(server);
+    await cleanup();
+  }
+});
+
+test("main bridge validates JSON bodies and invoke args", async () => {
+  const { module, cleanup } = await loadMainBridgeExample();
+  let server;
+
+  try {
+    await withEnv({ ENABLE_CODEX_BRIDGE: "1" }, async () => {
+      server = module.startCodexBridge({
+        token: "test-secret",
+        port: 0
+      });
+      await once(server, "listening");
+    });
+
+    const auth = { "x-codex-bridge-token": "test-secret" };
+    const malformed = await bridgeFetch(server, "/invoke", {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: "{"
+    });
+    assert.equal(malformed.status, 400);
+    assert.match(malformed.body.error, /valid JSON/);
+
+    const badArgs = await bridgeFetch(server, "/invoke", {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ name: "app.getVersion", args: "not-array" })
+    });
+    assert.equal(badArgs.status, 400);
+    assert.match(badArgs.body.error, /args must be an array/);
+
+    const badWindowId = await bridgeFetch(server, "/window/focus", {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ windowId: "1" })
+    });
+    assert.equal(badWindowId.status, 400);
+    assert.match(badWindowId.body.error, /windowId must be a positive integer/);
+  } finally {
+    await closeServer(server);
+    await cleanup();
+  }
+});
+
+test("main bridge rejects oversized request bodies", async () => {
+  const { module, cleanup } = await loadMainBridgeExample();
+  let server;
+
+  try {
+    await withEnv({ ENABLE_CODEX_BRIDGE: "1" }, async () => {
+      server = module.startCodexBridge({
+        token: "test-secret",
+        maxBodyBytes: 8,
+        port: 0
+      });
+      await once(server, "listening");
+    });
+
+    const response = await bridgeFetch(server, "/invoke", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-codex-bridge-token": "test-secret"
+      },
+      body: JSON.stringify({ name: "app.getVersion", args: [] })
+    });
+
+    assert.equal(response.status, 413);
+    assert.match(response.body.error, /exceeds 8 bytes/);
+  } finally {
+    await closeServer(server);
+    await cleanup();
+  }
+});
+
+test("MCP server rejects malformed bridge and CDP tool calls cleanly", async () => {
+  const invokeResult = await callMcpTool("electron_bridge_invoke", {
+    name: "",
+    args: []
+  });
+  assert.equal(invokeResult.isError, true);
+  assert.match(invokeResult.content[0].text, /name must be a non-empty string/);
+
+  const clickResult = await callMcpTool("electron_cdp_click", {
+    x: "bad",
+    y: 2
+  });
+  assert.equal(clickResult.isError, true);
+  assert.match(clickResult.content[0].text, /x must be a finite number/);
+
+  const getBodyResult = await callMcpTool("electron_bridge_request", {
+    path: "/health",
+    method: "GET",
+    body: { unsupported: true }
+  });
+  assert.equal(getBodyResult.isError, true);
+  assert.match(getBodyResult.content[0].text, /body is only supported for POST/);
+});
+
+test("MCP server reports tools and can run text-only orchestrator smoke", async () => {
+  const responses = await runMcp([
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2024-11-05" }
+    },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "electron_orchestrator_inspect",
+        arguments: {
+          includeRendererProbe: false,
+          includeScreenshot: false
+        }
+      }
+    }
+  ]);
+
+  assert.equal(responses.get(1).result.serverInfo.name, "electron-codex-bridge");
+  assert.ok(
+    responses.get(2).result.tools.some(
+      (tool) => tool.name === "electron_orchestrator_inspect"
+    )
+  );
+
+  const report = JSON.parse(responses.get(3).result.content[0].text);
+  assert.equal(report.bridge.auth.tokenConfigured, false);
+  assert.equal(report.cdp.url, "http://127.0.0.1:9223");
+});
+
+async function loadMainBridgeExample() {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "electron-codex-bridge-test-"));
+  const modulePath = path.join(tempDir, "electron-main-bridge-example.mjs");
+  const source = await readFile(MAIN_BRIDGE_EXAMPLE_PATH, "utf8");
+
+  await writeFile(modulePath, toRunnableMainBridgeModule(source), "utf8");
+
+  const stubs = createElectronStubs();
+  globalThis.__electronBridgeTest = stubs;
+
+  const module = await import(`${pathToFileURL(modulePath).href}?t=${Date.now()}`);
+  return {
+    module,
+    stubs,
+    async cleanup() {
+      delete globalThis.__electronBridgeTest;
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  };
+}
+
+function toRunnableMainBridgeModule(source) {
+  let transformed = source
+    .replace(
+      'import http from "node:http";',
+      "const http = globalThis.__electronBridgeTest.http;"
+    )
+    .replace(
+      'import { app, BrowserWindow } from "electron";',
+      [
+        "const { app, BrowserWindow } = globalThis.__electronBridgeTest;",
+        'if (!app || !BrowserWindow) throw new Error("Electron bridge test stubs are not installed.");'
+      ].join("\n")
+    )
+    .replace(/^type BridgeHandler = .*\n\n/m, "")
+    .replace(/export type CodexBridgeOptions = \{[\s\S]*?\};\n\n/, "")
+    .replace(/new Map<string, BridgeHandler>\(\)/g, "new Map()")
+    .replace(/export function registerCodexBridgeHandler\(name: string, handler: BridgeHandler\): void/g, "function registerCodexBridgeHandler(name, handler)")
+    .replace(/export function startCodexBridge\(options: CodexBridgeOptions = \{\}\): http\.Server \| undefined/g, "function startCodexBridge(options = {})")
+    .replace(/app\.getPath\(String\(name\) as Parameters<typeof app\.getPath>\[0\]\)/g, "app.getPath(String(name))")
+    .replace(/function describeWindow\(win: BrowserWindow\)/g, "function describeWindow(win)")
+    .replace(/function findWindow\(windowId: unknown\): BrowserWindow/g, "function findWindow(windowId)")
+    .replace(/function isAuthorized\(req: http\.IncomingMessage, token: string\): boolean/g, "function isAuthorized(req, token)")
+    .replace(/function constantTimeEquals\(actual: string, expected: string\): boolean/g, "function constantTimeEquals(actual, expected)")
+    .replace(/constructor\(\s*readonly status: number,\s*message: string\s*\) \{/m, "constructor(status, message) {")
+    .replace(/super\(message\);/g, "super(message);\n    this.status = status;")
+    .replace(/function resolveMaxBodyBytes\(optionValue: number \| undefined\): number/g, "function resolveMaxBodyBytes(optionValue)")
+    .replace(/async function readJsonBody\(\s*req: http\.IncomingMessage,\s*maxBodyBytes: number\s*\): Promise<Record<string, unknown>>/m, "async function readJsonBody(req, maxBodyBytes)")
+    .replace(/const chunks: Buffer\[\] = \[\];/g, "const chunks = [];")
+    .replace(/let parsed: unknown;/g, "let parsed;")
+    .replace(/function requireNonEmptyString\(value: unknown, fieldName: string, maxLength: number\): string/g, "function requireNonEmptyString(value, fieldName, maxLength)")
+    .replace(/function requireArray\(value: unknown, fieldName: string\): unknown\[\]/g, "function requireArray(value, fieldName)")
+    .replace(/function requirePositiveInteger\(value: unknown, fieldName: string\): number/g, "function requirePositiveInteger(value, fieldName)")
+    .replace(/function requireOptionalBoolean\(value: unknown, fieldName: string\): boolean \| undefined/g, "function requireOptionalBoolean(value, fieldName)")
+    .replace(/function isJsonObject\(value: unknown\): value is Record<string, unknown>/g, "function isJsonObject(value)")
+    .replace(/function sendJson\(res: http\.ServerResponse, status: number, payload: unknown\): void/g, "function sendJson(res, status, payload)");
+
+  transformed += "\nexport { registerCodexBridgeHandler, startCodexBridge };\n";
+  return transformed;
+}
+
+function createElectronStubs() {
+  const windows = new Map();
+  const sentMessages = [];
+  const devToolsEvents = [];
+
+  const app = {
+    getVersion: () => "9.9.9-test",
+    getPath: (name) => `/test/${name}`
+  };
+
+  const BrowserWindow = {
+    getAllWindows: () => [...windows.values()],
+    fromId: (id) => windows.get(id)
+  };
+
+  windows.set(1, {
+    id: 1,
+    getTitle: () => "Test Window",
+    isFocused: () => true,
+    isVisible: () => true,
+    isDestroyed: () => false,
+    getBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+    focus() {
+      this.focused = true;
+    },
+    webContents: {
+      getURL: () => "app://test",
+      send: (...args) => sentMessages.push(args),
+      openDevTools: (options) => devToolsEvents.push(["open", options]),
+      closeDevTools: () => devToolsEvents.push(["close"]),
+      executeJavaScript: async (expression) => ({ expression })
+    }
+  });
+
+  return {
+    app,
+    BrowserWindow,
+    http: createFakeHttp(),
+    sentMessages,
+    devToolsEvents
+  };
+}
+
+function createFakeHttp() {
+  let nextPort = 20000;
+
+  return {
+    createServer(listener) {
+      return new FakeServer(listener, () => nextPort++);
+    }
+  };
+}
+
+class FakeServer extends EventEmitter {
+  constructor(listener, nextPort) {
+    super();
+    this.listener = listener;
+    this.nextPort = nextPort;
+    this.listening = false;
+    this.serverAddress = null;
+  }
+
+  listen(port, host) {
+    this.listening = true;
+    this.serverAddress = {
+      address: host,
+      family: "IPv4",
+      port: port === 0 ? this.nextPort() : port
+    };
+    queueMicrotask(() => this.emit("listening"));
+    return this;
+  }
+
+  address() {
+    return this.serverAddress;
+  }
+
+  close(callback) {
+    this.listening = false;
+    queueMicrotask(() => {
+      this.emit("close");
+      callback?.();
+    });
+  }
+
+  async fetch(pathname, options = {}) {
+    let finish;
+    const response = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const request = new FakeRequest(pathname, options);
+    const serverResponse = new FakeResponse(finish);
+
+    await this.listener(request, serverResponse);
+    return response;
+  }
+}
+
+class FakeRequest extends Readable {
+  constructor(pathname, options) {
+    super();
+    this.method = options.method || "GET";
+    this.url = pathname;
+    this.headers = normalizeHeaders(options.headers || {});
+    this.body = options.body === undefined ? undefined : Buffer.from(String(options.body));
+    this.didRead = false;
+  }
+
+  _read() {
+    if (this.didRead) {
+      this.push(null);
+      return;
+    }
+
+    this.didRead = true;
+    if (this.body) {
+      this.push(this.body);
+    }
+    this.push(null);
+  }
+}
+
+class FakeResponse {
+  constructor(finish) {
+    this.finish = finish;
+    this.status = 200;
+    this.headers = {};
+  }
+
+  writeHead(status, headers) {
+    this.status = status;
+    this.headers = headers || {};
+  }
+
+  end(payload = "") {
+    this.finish({
+      status: this.status,
+      body: payload ? JSON.parse(String(payload)) : undefined,
+      headers: this.headers
+    });
+  }
+}
+
+function normalizeHeaders(headers) {
+  return Object.fromEntries(
+    Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value])
+  );
+}
+
+async function bridgeFetch(server, pathname, options = {}) {
+  return server.fetch(pathname, options);
+}
+
+async function closeServer(server) {
+  if (!server || !server.listening) return;
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+async function withEnv(values, callback) {
+  const previous = new Map();
+  for (const [key, value] of Object.entries(values)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    return await callback();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+async function callMcpTool(name, args) {
+  const responses = await runMcp([
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: args }
+    }
+  ]);
+  return responses.get(1).result;
+}
+
+async function runMcp(messages) {
+  const child = spawn(process.execPath, [MCP_SERVER_PATH], {
+    cwd: PLUGIN_DIR,
+    env: {
+      ...process.env,
+      CODEX_ELECTRON_BRIDGE_TOKEN: ""
+    },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+
+  for (const message of messages) {
+    child.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+  child.stdin.end();
+
+  const [code, signal] = await once(child, "close");
+  assert.equal(signal, null);
+  assert.equal(code, 0, stderr);
+
+  const responses = new Map();
+  for (const line of stdout.trim().split("\n").filter(Boolean)) {
+    const parsed = JSON.parse(line);
+    responses.set(parsed.id, parsed);
+  }
+  return responses;
+}

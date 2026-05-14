@@ -1,0 +1,15 @@
+{
+  "name": "electron-context-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex plugin for inspecting and driving local Electron apps during development.",
+  "type": "module",
+  "scripts": {
+    "check": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs",
+    "check:syntax": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs",
+    "test": "node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

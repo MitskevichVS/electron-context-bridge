@@ -67,6 +67,13 @@ Keep the bridge local-only and development-only.
 Malformed JSON, wrong argument types, and oversized bodies return `400` or
 `413` from the Electron main-process bridge.
 
+Run regression tests with:
+
+```bash
+npm test
+# or: node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs
+```
+
 ## Skills
 
 - `electron-codex-bridge`: inspect, debug, and control a local Electron app during development.
