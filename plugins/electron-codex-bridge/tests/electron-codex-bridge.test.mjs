@@ -211,6 +211,75 @@ test("MCP server reports tools and can run text-only orchestrator smoke", async 
   assert.equal(report.cdp.url, "http://127.0.0.1:9223");
 });
 
+test("target selection prefers focused BrowserWindow matches when no targetId is set", async () => {
+  const { module, cleanup } = await loadMcpInternals();
+  try {
+    const targets = [
+      createCdpTarget({ id: "background", url: "app://background", title: "Background" }),
+      createCdpTarget({ id: "focused", url: "app://focused", title: "Focused Window" })
+    ];
+
+    const result = await module.selectTarget({}, {
+      targets,
+      windows: [
+        { id: 1, url: "app://focused", title: "Focused Window", focused: true, visible: true }
+      ]
+    });
+
+    assert.equal(result.target.id, "focused");
+    assert.equal(result.selection.reason, "focused BrowserWindow matched by url");
+    assert.equal(result.selection.matchedFocusedWindow, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("target selection keeps explicit targetId stronger than focused window", async () => {
+  const { module, cleanup } = await loadMcpInternals();
+  try {
+    const targets = [
+      createCdpTarget({ id: "explicit", url: "app://explicit", title: "Explicit" }),
+      createCdpTarget({ id: "focused", url: "app://focused", title: "Focused Window" })
+    ];
+
+    const result = await module.selectTarget({ targetId: "explicit" }, {
+      targets,
+      windows: [
+        { id: 1, url: "app://focused", title: "Focused Window", focused: true, visible: true }
+      ]
+    });
+
+    assert.equal(result.target.id, "explicit");
+    assert.equal(result.selection.reason, "explicit targetId matched");
+    assert.equal(result.selection.matchedFocusedWindow, false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("target selection reports ambiguity for multiple urlIncludes matches", async () => {
+  const { module, cleanup } = await loadMcpInternals();
+  try {
+    const targets = [
+      createCdpTarget({ id: "settings-one", url: "app://settings/one", title: "Settings" }),
+      createCdpTarget({ id: "settings-two", url: "app://settings/two", title: "Settings - Focused" })
+    ];
+
+    const result = await module.selectTarget({ urlIncludes: "settings" }, {
+      targets,
+      windows: [
+        { id: 1, url: "app://settings/two", title: "Settings - Focused", focused: true, visible: true }
+      ]
+    });
+
+    assert.equal(result.target.id, "settings-two");
+    assert.equal(result.selection.reason, "focused BrowserWindow matched by url");
+    assert.ok(result.selection.notes.some((note) => note.includes("urlIncludes matched 2")));
+  } finally {
+    await cleanup();
+  }
+});
+
 async function loadMainBridgeExample() {
   const tempDir = await mkdtemp(path.join(tmpdir(), "electron-codex-bridge-test-"));
   const modulePath = path.join(tempDir, "electron-main-bridge-example.mjs");
@@ -229,6 +298,37 @@ async function loadMainBridgeExample() {
       delete globalThis.__electronBridgeTest;
       await rm(tempDir, { recursive: true, force: true });
     }
+  };
+}
+
+async function loadMcpInternals() {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "electron-codex-bridge-mcp-test-"));
+  const modulePath = path.join(tempDir, "electron-codex-bridge-internals.mjs");
+  const source = await readFile(MCP_SERVER_PATH, "utf8");
+  const transformed = source.replace(
+    /const rl = readline\.createInterface\([\s\S]*$/m,
+    "export { selectTarget };\n"
+  );
+
+  await writeFile(modulePath, transformed, "utf8");
+
+  const module = await import(`${pathToFileURL(modulePath).href}?t=${Date.now()}`);
+  return {
+    module,
+    async cleanup() {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  };
+}
+
+function createCdpTarget(overrides) {
+  return {
+    id: "target",
+    type: "page",
+    title: "",
+    url: "",
+    webSocketDebuggerUrl: "ws://127.0.0.1/devtools/page/target",
+    ...overrides
   };
 }
 

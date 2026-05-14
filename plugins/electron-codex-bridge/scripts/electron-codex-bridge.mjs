@@ -298,6 +298,100 @@ function validateTargetSelectorArgs(args) {
   }
 }
 
+function findFocusedWindow(windows) {
+  if (!Array.isArray(windows)) return null;
+  return windows.find((window) => {
+    return window && window.focused === true && window.destroyed !== true;
+  }) || null;
+}
+
+function chooseFocusedWindowTarget(targets, focusedWindow) {
+  const matches = targets
+    .map((target) => ({
+      target,
+      matchField: getTargetWindowMatchField(target, focusedWindow)
+    }))
+    .filter((match) => match.matchField);
+
+  if (!matches.length) return null;
+
+  const selected = chooseTargetByType(matches.map((match) => match.target));
+  const selectedMatch = matches.find((match) => match.target === selected);
+  return {
+    target: selected,
+    matchField: selectedMatch?.matchField || "window"
+  };
+}
+
+function chooseTargetByType(targets) {
+  return (
+    targets.find((target) => target.type === "page") ||
+    targets.find((target) => target.type === "webview") ||
+    targets[0]
+  );
+}
+
+function getTargetWindowMatchField(target, window) {
+  const targetUrl = normalizeComparable(target?.url);
+  const windowUrl = normalizeComparable(window?.url);
+  if (targetUrl && windowUrl && targetUrl === windowUrl) {
+    return "url";
+  }
+
+  const targetTitle = normalizeComparable(target?.title);
+  const windowTitle = normalizeComparable(window?.title);
+  if (targetTitle && windowTitle && targetTitle === windowTitle) {
+    return "title";
+  }
+
+  return "";
+}
+
+function normalizeComparable(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function describeTargetSelection({
+  args,
+  candidates,
+  debuggable,
+  focusedWindow,
+  focusedMatch,
+  selected,
+  notes
+}) {
+  const selectionNotes = [...notes];
+  let reason;
+
+  if (args.targetId) {
+    reason = "explicit targetId matched";
+  } else if (focusedMatch) {
+    reason = `focused BrowserWindow matched by ${focusedMatch.matchField}`;
+  } else if (args.urlIncludes) {
+    reason = "urlIncludes matched; selected preferred target type";
+  } else {
+    reason = "selected preferred target type";
+  }
+
+  if (!args.targetId && focusedWindow && !focusedMatch) {
+    selectionNotes.push("Focused BrowserWindow did not match any candidate CDP target by URL or title.");
+  }
+
+  if (!args.targetId && !args.urlIncludes && candidates.length > 1 && !focusedMatch) {
+    selectionNotes.push(`Multiple debuggable targets were available; selected first preferred target type from ${candidates.length} candidates.`);
+  }
+
+  return {
+    reason,
+    candidateCount: candidates.length,
+    debuggableTargetCount: debuggable.length,
+    selectedTargetId: selected.id,
+    focusedWindow: focusedWindow ? summarizeWindow(focusedWindow) : null,
+    matchedFocusedWindow: Boolean(focusedMatch),
+    notes: selectionNotes
+  };
+}
+
 async function request(url, options = {}) {
   if (typeof fetch !== "function") {
     throw new Error("This MCP server requires Node.js 18+ with global fetch support.");
@@ -348,11 +442,14 @@ async function listCdpTargets(args) {
   return payload;
 }
 
-async function selectTarget(args) {
+async function selectTarget(args, context = {}) {
   validateTargetSelectorArgs(args);
-  const targets = await listCdpTargets(args);
+  const targets = Array.isArray(context.targets)
+    ? context.targets
+    : await listCdpTargets(args);
   const debuggable = targets.filter((target) => target.webSocketDebuggerUrl);
   let candidates = debuggable;
+  const notes = [];
 
   if (args.targetId) {
     candidates = candidates.filter((target) => target.id === args.targetId);
@@ -365,20 +462,36 @@ async function selectTarget(args) {
     });
   }
 
-  const selected =
-    candidates.find((target) => target.type === "page") ||
-    candidates.find((target) => target.type === "webview") ||
-    candidates[0];
+  if (args.urlIncludes && candidates.length > 1) {
+    notes.push(`urlIncludes matched ${candidates.length} debuggable targets.`);
+  }
+
+  const focusedWindow = findFocusedWindow(context.windows);
+  const focusedMatch = !args.targetId && focusedWindow
+    ? chooseFocusedWindowTarget(candidates, focusedWindow)
+    : null;
+
+  const selected = focusedMatch?.target || chooseTargetByType(candidates);
 
   if (!selected) {
     throw new Error("No matching CDP target with a webSocketDebuggerUrl was found.");
   }
 
-  return selected;
+  const selection = describeTargetSelection({
+    args,
+    candidates,
+    debuggable,
+    focusedWindow,
+    focusedMatch,
+    selected,
+    notes
+  });
+
+  return { target: selected, selection };
 }
 
 async function withCdpTarget(args, callback) {
-  const target = await selectTarget(args);
+  const { target, selection } = await selectTarget(args);
   const socket = await connectWebSocket(target.webSocketDebuggerUrl);
   const pending = new Map();
   let nextId = 1;
@@ -417,7 +530,7 @@ async function withCdpTarget(args, callback) {
   };
 
   try {
-    return await callback(call, target);
+    return await callback(call, target, selection);
   } finally {
     for (const { reject, timer } of pending.values()) {
       clearTimeout(timer);
@@ -609,7 +722,7 @@ async function cdpEvaluate(args) {
   args.awaitPromise = optionalBoolean(args.awaitPromise, "awaitPromise", true);
   args.returnByValue = optionalBoolean(args.returnByValue, "returnByValue", true);
 
-  return withCdpTarget(args, async (call, target) => {
+  return withCdpTarget(args, async (call, target, selection) => {
     await call("Runtime.enable");
     const result = await call("Runtime.evaluate", {
       expression: args.expression,
@@ -617,7 +730,7 @@ async function cdpEvaluate(args) {
       returnByValue: args.returnByValue,
       userGesture: true
     });
-    return { target: summarizeTarget(target), result };
+    return { target: summarizeTarget(target), selection, result };
   });
 }
 
@@ -630,7 +743,7 @@ async function cdpScreenshot(args) {
     }
   }
 
-  return withCdpTarget(args, async (call, target) => {
+  return withCdpTarget(args, async (call, target, selection) => {
     await call("Page.enable");
     const format = args.format;
     const params = { format, captureBeyondViewport: true };
@@ -640,6 +753,7 @@ async function cdpScreenshot(args) {
     const result = await call("Page.captureScreenshot", params, 15000);
     return {
       target: summarizeTarget(target),
+      selection,
       data: result.data,
       mimeType: format === "jpeg" ? "image/jpeg" : "image/png"
     };
@@ -652,7 +766,7 @@ async function cdpClick(args) {
   args.button = requireEnum(args.button, "button", ["left", "middle", "right"], "left");
   args.clickCount = optionalPositiveInteger(args.clickCount, "clickCount", 1);
 
-  return withCdpTarget(args, async (call, target) => {
+  return withCdpTarget(args, async (call, target, selection) => {
     const button = args.button;
     const clickCount = args.clickCount;
     await call("Input.dispatchMouseEvent", {
@@ -669,16 +783,16 @@ async function cdpClick(args) {
       button,
       clickCount
     });
-    return { target: summarizeTarget(target), clicked: { x: args.x, y: args.y, button, clickCount } };
+    return { target: summarizeTarget(target), selection, clicked: { x: args.x, y: args.y, button, clickCount } };
   });
 }
 
 async function cdpType(args) {
   args.text = requireString(args.text, "text", MAX_TYPED_TEXT_LENGTH);
 
-  return withCdpTarget(args, async (call, target) => {
+  return withCdpTarget(args, async (call, target, selection) => {
     await call("Input.insertText", { text: args.text });
-    return { target: summarizeTarget(target), insertedTextLength: args.text.length };
+    return { target: summarizeTarget(target), selection, insertedTextLength: args.text.length };
   });
 }
 
@@ -688,6 +802,16 @@ function summarizeTarget(target) {
     type: target.type,
     title: target.title,
     url: target.url
+  };
+}
+
+function summarizeWindow(window) {
+  return {
+    id: window.id,
+    title: window.title,
+    url: window.url,
+    focused: window.focused,
+    visible: window.visible
   };
 }
 
@@ -726,8 +850,12 @@ async function orchestratorInspect(args) {
   const cdpTargets = await attempt(() => listCdpTargets(args));
   report.cdp.targets = unwrapAttempt(cdpTargets, (value) => value.map(summarizeTarget));
 
-  const selectedTarget = await attempt(() => selectTarget(args));
-  report.cdp.selectedTarget = unwrapAttempt(selectedTarget, summarizeTarget);
+  const selectedTarget = await attempt(() => selectTarget(args, {
+    targets: cdpTargets.ok ? cdpTargets.value : undefined,
+    windows: bridgeWindows.ok ? bridgeWindows.value.body : undefined
+  }));
+  report.cdp.selectedTarget = unwrapAttempt(selectedTarget, (value) => summarizeTarget(value.target));
+  report.cdp.targetSelection = unwrapAttempt(selectedTarget, (value) => value.selection);
 
   if (!cdpTargets.ok) {
     report.notes.push("CDP is not reachable. Confirm the Electron app started with remote-debugging-port=9223.");
@@ -743,10 +871,20 @@ async function orchestratorInspect(args) {
     );
   }
 
+  if (selectedTarget.ok) {
+    for (const note of selectedTarget.value.selection.notes) {
+      report.notes.push(note);
+    }
+  }
+
+  const selectedTargetArgs = selectedTarget.ok
+    ? { ...args, targetId: selectedTarget.value.target.id }
+    : args;
+
   if (args.includeRendererProbe) {
     const rendererProbe = await attempt(() =>
       cdpEvaluate({
-        ...args,
+        ...selectedTargetArgs,
         expression: rendererProbeExpression(),
         awaitPromise: true,
         returnByValue: true
@@ -758,7 +896,7 @@ async function orchestratorInspect(args) {
   if (args.includeScreenshot) {
     const screenshot = await attempt(() =>
       cdpScreenshot({
-        ...args,
+        ...selectedTargetArgs,
         format: args.screenshotFormat || "png",
         quality: args.screenshotQuality
       })
@@ -893,7 +1031,11 @@ async function callTool(name, args) {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ target: screenshot.target, mimeType: screenshot.mimeType }, null, 2)
+            text: JSON.stringify({
+              target: screenshot.target,
+              selection: screenshot.selection,
+              mimeType: screenshot.mimeType
+            }, null, 2)
           },
           {
             type: "image",

@@ -30,10 +30,14 @@ Use `electron_orchestrator_inspect` when the user asks for a broad Electron stat
 
 Useful arguments:
 
-- `urlIncludes`: choose a renderer target by URL or title substring.
-- `targetId`: choose an exact CDP target id.
+- `targetId`: choose an exact CDP target id; this is the strongest override.
+- `urlIncludes`: narrow renderer target candidates by URL or title substring.
 - `includeScreenshot`: defaults to true; set false for text-only checks.
 - `includeRendererProbe`: defaults to true; reads document title, URL, readyState, viewport, and active element.
+
+Without `targetId`, prefer the focused BrowserWindow's matching CDP target when
+the main-process bridge window list is available. Read `cdp.targetSelection` in
+the orchestrator report to understand the selected target and ambiguity notes.
 
 ## Electron App Setup
 

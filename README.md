@@ -199,10 +199,15 @@ Use electron-codex-bridge to invoke app.getVersion through the bridge.
 
 The orchestrator accepts optional arguments through the tool call:
 
-- `urlIncludes`: choose a target by URL or window title substring
-- `targetId`: choose an exact CDP target id
+- `targetId`: choose an exact CDP target id; this is the strongest override
+- `urlIncludes`: narrow candidates by URL or window title substring
 - `includeScreenshot`: defaults to true
 - `includeRendererProbe`: defaults to true
+
+Without `targetId`, the orchestrator uses the main-process bridge window list
+when available and prefers the focused BrowserWindow's matching CDP target by
+URL or title. The report includes `cdp.targetSelection` with the selection
+reason and ambiguity notes.
 
 ## Main-Process Bridge Handlers
 
