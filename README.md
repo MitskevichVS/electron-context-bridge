@@ -364,6 +364,7 @@ Check the MCP server syntax:
 
 ```bash
 node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs
+node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts
 ```
 
 Run the bridge regression tests:
@@ -372,6 +373,9 @@ Run the bridge regression tests:
 npm test
 # or: node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs
 ```
+
+Tests import the bridge sample as real TypeScript through Node's native type
+stripping. Use Node 24 or newer for local checks.
 
 Smoke-test MCP initialization:
 

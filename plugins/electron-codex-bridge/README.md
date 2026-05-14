@@ -82,6 +82,9 @@ npm test
 # or: node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs
 ```
 
+The tests import `scripts/electron-main-bridge-example.ts` directly through
+Node's native TypeScript stripping. Use Node 24 or newer for local checks.
+
 ## Skills
 
 - `electron-codex-bridge`: inspect, debug, and control a local Electron app during development.

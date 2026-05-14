@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { EventEmitter } from "node:events";
+import { registerHooks } from "node:module";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,6 +18,60 @@ const MAIN_BRIDGE_EXAMPLE_PATH = path.join(
   "scripts",
   "electron-main-bridge-example.ts"
 );
+let bridgeImportCounter = 0;
+const ELECTRON_TEST_MODULE_URL = `data:text/javascript,${encodeURIComponent(`
+function stubs() {
+  const value = globalThis.__electronBridgeTest;
+  if (!value) throw new Error("Electron bridge test stubs are not installed.");
+  return value;
+}
+
+export const app = new Proxy({}, {
+  get(_target, property) {
+    return stubs().app[property];
+  }
+});
+
+export const BrowserWindow = new Proxy({}, {
+  get(_target, property) {
+    return stubs().BrowserWindow[property];
+  }
+});
+`)}`;
+const HTTP_TEST_MODULE_URL = `data:text/javascript,${encodeURIComponent(`
+function stubs() {
+  const value = globalThis.__electronBridgeTest;
+  if (!value) throw new Error("Electron bridge test stubs are not installed.");
+  return value;
+}
+
+const http = new Proxy({}, {
+  get(_target, property) {
+    return stubs().http[property];
+  }
+});
+
+export const createServer = (...args) => stubs().http.createServer(...args);
+export default http;
+`)}`;
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "node:http") {
+      return {
+        url: HTTP_TEST_MODULE_URL,
+        shortCircuit: true
+      };
+    }
+    if (specifier === "electron") {
+      return {
+        url: ELECTRON_TEST_MODULE_URL,
+        shortCircuit: true
+      };
+    }
+    return nextResolve(specifier, context);
+  }
+});
 
 test("main bridge refuses to start without token unless unauthenticated mode is explicit", async () => {
   const { module, cleanup } = await loadMainBridgeExample();
@@ -449,22 +504,15 @@ test("target selection reports ambiguity for multiple urlIncludes matches", asyn
 });
 
 async function loadMainBridgeExample() {
-  const tempDir = await mkdtemp(path.join(tmpdir(), "electron-codex-bridge-test-"));
-  const modulePath = path.join(tempDir, "electron-main-bridge-example.mjs");
-  const source = await readFile(MAIN_BRIDGE_EXAMPLE_PATH, "utf8");
-
-  await writeFile(modulePath, toRunnableMainBridgeModule(source), "utf8");
-
   const stubs = createElectronStubs();
   globalThis.__electronBridgeTest = stubs;
 
-  const module = await import(`${pathToFileURL(modulePath).href}?t=${Date.now()}`);
+  const module = await import(`${pathToFileURL(MAIN_BRIDGE_EXAMPLE_PATH).href}?t=${Date.now()}-${++bridgeImportCounter}`);
   return {
     module,
     stubs,
     async cleanup() {
       delete globalThis.__electronBridgeTest;
-      await rm(tempDir, { recursive: true, force: true });
     }
   };
 }
@@ -498,70 +546,6 @@ function createCdpTarget(overrides) {
     webSocketDebuggerUrl: "ws://127.0.0.1/devtools/page/target",
     ...overrides
   };
-}
-
-function toRunnableMainBridgeModule(source) {
-  let transformed = source
-    .replace(
-      'import http from "node:http";',
-      "const http = globalThis.__electronBridgeTest.http;"
-    )
-    .replace(
-      'import { app, BrowserWindow } from "electron";',
-      [
-        "const { app, BrowserWindow } = globalThis.__electronBridgeTest;",
-        'if (!app || !BrowserWindow) throw new Error("Electron bridge test stubs are not installed.");'
-      ].join("\n")
-    )
-    .replace(/^type BridgeHandler = .*\n\n/m, "")
-    .replace(/export type CodexBridgeHandlerParameterType =[\s\S]*?;\n\n/, "")
-    .replace(/export type CodexBridgeHandlerParameterMetadata = \{[\s\S]*?\};\n\n/, "")
-    .replace(/export type CodexBridgeHandlerMetadata = \{[\s\S]*?\};\n\n/, "")
-    .replace(/type BridgeHandlerRecord = \{[\s\S]*?\};\n\n/, "")
-    .replace(/export type CodexBridgeOptions = \{[\s\S]*?\};\n\n/, "")
-    .replace(/new Map<string, BridgeHandlerRecord>\(\)/g, "new Map()")
-    .replace(/export function registerCodexBridgeHandler\(\s*name: string,\s*handler: BridgeHandler,\s*metadata: CodexBridgeHandlerMetadata = \{\}\s*\): void/m, "function registerCodexBridgeHandler(name, handler, metadata = {})")
-    .replace(/export function startCodexBridge\(options: CodexBridgeOptions = \{\}\): http\.Server \| undefined/g, "function startCodexBridge(options = {})")
-    .replace(/app\.getPath\(String\(name\) as Parameters<typeof app\.getPath>\[0\]\)/g, "app.getPath(String(name))")
-    .replace(/function describeWindow\(win: BrowserWindow\)/g, "function describeWindow(win)")
-    .replace(/function validateHandlerArgs\(\s*parameters: CodexBridgeHandlerParameterMetadata\[\] \| undefined,\s*args: unknown\[\]\s*\): void/m, "function validateHandlerArgs(parameters, args)")
-    .replace(/function validateHandlerArg\(\s*parameter: CodexBridgeHandlerParameterMetadata,\s*value: unknown,\s*index: number\s*\): void/m, "function validateHandlerArg(parameter, value, index)")
-    .replace(/function matchesParameterType\(type: CodexBridgeHandlerParameterType, value: unknown\): boolean/g, "function matchesParameterType(type, value)")
-    .replace(/function expectedTypeLabel\(type: CodexBridgeHandlerParameterType\): string/g, "function expectedTypeLabel(type)")
-    .replace(/function findWindow\(windowId: unknown\): BrowserWindow/g, "function findWindow(windowId)")
-    .replace(/function isAuthorized\(req: http\.IncomingMessage, token: string\): boolean/g, "function isAuthorized(req, token)")
-    .replace(/function constantTimeEquals\(actual: string, expected: string\): boolean/g, "function constantTimeEquals(actual, expected)")
-    .replace(/constructor\(\s*readonly status: number,\s*message: string,\s*readonly code: string = bridgeErrorCodeForStatus\(status\)\s*\) \{/m, "constructor(status, message, code = bridgeErrorCodeForStatus(status)) {")
-    .replace(/super\(message\);/g, "super(message);\n    this.status = status;\n    this.code = code;")
-    .replace(/function bridgeErrorCodeForStatus\(status: number\): string/g, "function bridgeErrorCodeForStatus(status)")
-    .replace(/function resolveMaxBodyBytes\(optionValue: number \| undefined\): number/g, "function resolveMaxBodyBytes(optionValue)")
-    .replace(/function normalizeHandlerMetadata\(metadata: CodexBridgeHandlerMetadata\): CodexBridgeHandlerMetadata/g, "function normalizeHandlerMetadata(metadata)")
-    .replace(/function normalizeOptionalMetadataString\(\s*value: unknown,\s*fieldName: string,\s*maxLength: number\s*\): string \| undefined/m, "function normalizeOptionalMetadataString(value, fieldName, maxLength)")
-    .replace(/function normalizeHandlerArgDescriptions\(value: unknown\): string\[\] \| undefined/g, "function normalizeHandlerArgDescriptions(value)")
-    .replace(/function normalizeHandlerParameters\(value: unknown\): CodexBridgeHandlerParameterMetadata\[\] \| undefined/g, "function normalizeHandlerParameters(value)")
-    .replace(/function normalizeHandlerParameter\(value: unknown, index: number\): CodexBridgeHandlerParameterMetadata/g, "function normalizeHandlerParameter(value, index)")
-    .replace(/function normalizeHandlerParameterType\(\s*value: unknown,\s*index: number\s*\): CodexBridgeHandlerParameterType/m, "function normalizeHandlerParameterType(value, index)")
-    .replace(/return value as CodexBridgeHandlerParameterType;/g, "return value;")
-    .replace(/function normalizeRequiredMetadataString\(\s*value: unknown,\s*fieldName: string,\s*maxLength: number\s*\): string/m, "function normalizeRequiredMetadataString(value, fieldName, maxLength)")
-    .replace(/function normalizeOptionalMetadataBoolean\(\s*value: unknown,\s*fieldName: string,\s*defaultValue: boolean\s*\): boolean/m, "function normalizeOptionalMetadataBoolean(value, fieldName, defaultValue)")
-    .replace(/function normalizeHandlerEnumValues\(\s*value: unknown,\s*fieldName: string\s*\): Array<string \| number \| boolean \| null> \| undefined/m, "function normalizeHandlerEnumValues(value, fieldName)")
-    .replace(/async function readJsonBody\(\s*req: http\.IncomingMessage,\s*maxBodyBytes: number\s*\): Promise<Record<string, unknown>>/m, "async function readJsonBody(req, maxBodyBytes)")
-    .replace(/const chunks: Buffer\[\] = \[\];/g, "const chunks = [];")
-    .replace(/let parsed: unknown;/g, "let parsed;")
-    .replace(/function requireNonEmptyString\(value: unknown, fieldName: string, maxLength: number\): string/g, "function requireNonEmptyString(value, fieldName, maxLength)")
-    .replace(/function requireArray\(value: unknown, fieldName: string\): unknown\[\]/g, "function requireArray(value, fieldName)")
-    .replace(/function requirePositiveInteger\(value: unknown, fieldName: string\): number/g, "function requirePositiveInteger(value, fieldName)")
-    .replace(/function requireOptionalBoolean\(value: unknown, fieldName: string\): boolean \| undefined/g, "function requireOptionalBoolean(value, fieldName)")
-    .replace(/function isJsonObject\(value: unknown\): value is Record<string, unknown>/g, "function isJsonObject(value)")
-    .replace(/function isJsonPrimitive\(value: unknown\): value is string \| number \| boolean \| null/g, "function isJsonPrimitive(value)")
-    .replace(/function errorMessage\(error: unknown\): string/g, "function errorMessage(error)")
-    .replace(/function sendData\(res: http\.ServerResponse, status: number, data: unknown\): void/g, "function sendData(res, status, data)")
-    .replace(/function sendError\(res: http\.ServerResponse, status: number, code: string, message: string\): void/g, "function sendError(res, status, code, message)")
-    .replace(/function formatJsonLiteral\(value: string \| number \| boolean \| null\): string/g, "function formatJsonLiteral(value)")
-    .replace(/function sendJson\(res: http\.ServerResponse, status: number, payload: unknown\): void/g, "function sendJson(res, status, payload)");
-
-  transformed += "\nexport { registerCodexBridgeHandler, startCodexBridge };\n";
-  return transformed;
 }
 
 function createElectronStubs() {

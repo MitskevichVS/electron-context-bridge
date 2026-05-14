@@ -5,11 +5,14 @@
   "description": "Codex plugin for inspecting and driving local Electron apps during development.",
   "type": "module",
   "scripts": {
-    "check": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs",
-    "check:syntax": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs",
+    "check": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts && node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs",
+    "check:syntax": "node --check plugins/electron-codex-bridge/scripts/electron-codex-bridge.mjs && node --check plugins/electron-codex-bridge/scripts/electron-main-bridge-example.ts",
     "test": "node --test plugins/electron-codex-bridge/tests/electron-codex-bridge.test.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@types/node": "^25.7.0"
   }
 }

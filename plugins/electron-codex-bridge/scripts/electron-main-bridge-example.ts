@@ -373,12 +373,13 @@ function constantTimeEquals(actual: string, expected: string): boolean {
 }
 
 class BridgeRequestError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly code: string = bridgeErrorCodeForStatus(status)
-  ) {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, message: string, code: string = bridgeErrorCodeForStatus(status)) {
     super(message);
+    this.status = status;
+    this.code = code;
     Object.setPrototypeOf(this, BridgeRequestError.prototype);
   }
 }
